@@ -1,7 +1,7 @@
 export interface JwtAccessPayload {
   sub: string;
   email: string;
-  username: string;
+  username?: string | null;
   jti: string;
   iat?: number;
   exp?: number;
@@ -24,7 +24,7 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: {
     id: string;
-    username: string;
+    username: string | null;
     email: string;
     authProvider: string;
     avatarUrl?: string | null;

@@ -78,7 +78,7 @@ export const api = {
 export interface AuthUser {
   id: string;
   email: string;
-  username: string;
+  username: string | null;
 }
 
 export interface AuthTokens {

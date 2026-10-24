@@ -76,7 +76,7 @@ export class AuthService {
   private async issueTokens(
     userId: string,
     email: string,
-    username: string,
+    username: string | null | undefined,
     metadata: { ip?: string; userAgent?: string },
     existingSid?: string,
   ): Promise<AuthTokens> {
