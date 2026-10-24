@@ -51,6 +51,7 @@ export interface WorkflowNodeData {
   // Intent Classifier & Semantic Routing
   classifierMode?: 'semantic' | 'llm' | 'regex';
   inputVar?: string;
+  classifierPrompt?: string;
   routes?: RouteOption[];
   fallbackRoute?: string;
   fallbackTargetNodeId?: string;

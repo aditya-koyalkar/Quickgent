@@ -487,6 +487,9 @@ export function compileLangGraphJSON(graph: WorkflowGraph): LangGraphCompiled {
     } else if (n.type === 'classifier') {
       config.classifier_mode = n.data.classifierMode || 'semantic';
       config.input_var = n.data.inputVar || 'user_message';
+      if (n.data.classifierPrompt) {
+        config.classification_prompt = n.data.classifierPrompt;
+      }
       config.routes = n.data.routes || [];
       config.fallback_route = n.data.fallbackRoute || 'default';
     } else if (n.type === 'condition') {
@@ -2501,6 +2504,25 @@ export default function ProjectStudioPage() {
                       }));
                     }}
                   />
+
+                  {selectedNode.data.classifierMode === 'llm' && (
+                    <TextareaField
+                      label="LLM Classification Prompt / Instructions"
+                      value={selectedNode.data.classifierPrompt || ''}
+                      placeholder="Explain how the LLM should decide between the routes (e.g. 'Classify as Billing if the user asks about invoices or cards. Classify as Technical for bugs, 500 errors, or code')."
+                      rows={4}
+                      onChange={(val) => {
+                        setGraph((prev) => ({
+                          ...prev,
+                          nodes: prev.nodes.map((n) =>
+                            n.id === selectedNode.id
+                              ? { ...n, data: { ...n.data, classifierPrompt: val } }
+                              : n,
+                          ),
+                        }));
+                      }}
+                    />
+                  )}
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-semibold text-neutral-300">
