@@ -52,25 +52,8 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-// ── Temporary dashboard placeholder ─────────────────────────────────
-function DashboardPlaceholder() {
-  const { user, signOut } = useAuth();
-
-  return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4">
-      <h1 className="text-2xl font-bold text-neutral-900">
-        Welcome, {user?.username} 👋
-      </h1>
-      <p className="text-neutral-500">Dashboard coming soon.</p>
-      <button
-        onClick={() => signOut()}
-        className="rounded-xl bg-neutral-900 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-neutral-800"
-      >
-        Sign Out
-      </button>
-    </div>
-  );
-}
+import DashboardPage from './pages/DashboardPage';
+import ProjectStudioPage from './pages/ProjectStudioPage';
 
 // ── App ─────────────────────────────────────────────────────────────
 function AppRoutes() {
@@ -97,7 +80,15 @@ function AppRoutes() {
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <DashboardPlaceholder />
+            <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projects/:id"
+        element={
+          <ProtectedRoute>
+            <ProjectStudioPage />
           </ProtectedRoute>
         }
       />

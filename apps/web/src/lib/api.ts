@@ -122,3 +122,74 @@ export const authApi = {
   getMe: () =>
     api.get<AuthUser>('/auth/me'),
 };
+
+// ── Project types ───────────────────────────────────────────────────
+export interface ProjectItem {
+  id: string;
+  name: string;
+  isActive: boolean;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    workflows: number;
+    conversations: number;
+  };
+}
+
+export interface ProjectDetail extends ProjectItem {
+  workflows: Array<{
+    id: string;
+    name: string;
+    version: string;
+    status: 'DRAFT' | 'LIVE' | 'ARCHIVED';
+    graph: any;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  conversations: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+    messages: Array<{
+      id: string;
+      role: 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
+      content: any;
+      metadata: any;
+      model?: string;
+      createdAt: string;
+    }>;
+  }>;
+}
+
+export interface ProjectsResponse {
+  data: ProjectItem[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+// ── Projects API functions ──────────────────────────────────────────
+export const projectsApi = {
+  list: (params?: { page?: number; limit?: number; search?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.search) searchParams.set('search', params.search);
+    const query = searchParams.toString();
+    return api.get<ProjectsResponse>(`/projects${query ? `?${query}` : ''}`);
+  },
+
+  get: (id: string) => api.get<ProjectDetail>(`/projects/${id}`),
+
+  create: (data: { name?: string }) => api.post<ProjectItem>('/projects', data),
+
+  update: (id: string, data: { name?: string; isActive?: boolean }) =>
+    api.patch<ProjectItem>(`/projects/${id}`, data),
+};
+
