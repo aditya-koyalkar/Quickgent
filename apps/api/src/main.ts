@@ -1,12 +1,17 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { LoggerService } from './logger/logger.service';
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+  });
+
+  const logger = app.get(LoggerService);
+  app.useLogger(logger);
 
   // Security headers
   app.use(helmet());
@@ -34,8 +39,8 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
 
-  logger.log(`API server is running on http://localhost:${port}`);
-  logger.log(`Health check: http://localhost:${port}/health`);
+  logger.log(`API server is running on http://localhost:${port}`, 'Bootstrap');
+  logger.log(`Health check: http://localhost:${port}/health`, 'Bootstrap');
 }
 
 bootstrap();

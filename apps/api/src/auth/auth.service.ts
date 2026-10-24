@@ -12,6 +12,7 @@ import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenStorageService } from './token-storage.service';
+import { LoggerService } from '../logger/logger.service';
 import {
   SignUpDto,
   SignInDto,
@@ -28,7 +29,6 @@ import {
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
   private readonly accessSecret: string;
   private readonly refreshSecret: string;
   private readonly accessTtlSeconds = 15 * 60; // 15 minutes
@@ -39,6 +39,7 @@ export class AuthService {
     private readonly tokenStorage: TokenStorageService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly logger: LoggerService,
   ) {
     this.accessSecret =
       this.configService.get<string>('JWT_ACCESS_SECRET') ||
@@ -173,6 +174,12 @@ export class AuthService {
       metadata,
     );
 
+    this.logger.log('User signed up successfully', 'AuthService', {
+      userId: user.id,
+      email: user.email,
+      ip: metadata.ip,
+    });
+
     return {
       user: {
         id: user.id,
@@ -201,11 +208,20 @@ export class AuthService {
     });
 
     if (!user || !user.password) {
+      this.logger.warn('Sign-in failed: user not found or no password configured', 'AuthService', {
+        identifier,
+        ip: metadata.ip,
+      });
       throw new UnauthorizedException('Invalid email/username or password');
     }
 
     const isValid = await this.verifyPassword(user.password, dto.password);
     if (!isValid) {
+      this.logger.warn('Sign-in failed: incorrect password', 'AuthService', {
+        userId: user.id,
+        identifier,
+        ip: metadata.ip,
+      });
       throw new UnauthorizedException('Invalid email/username or password');
     }
 
@@ -215,6 +231,12 @@ export class AuthService {
       user.username,
       metadata,
     );
+
+    this.logger.log('User signed in successfully', 'AuthService', {
+      userId: user.id,
+      identifier: user.email,
+      ip: metadata.ip,
+    });
 
     return {
       user: {
@@ -309,6 +331,12 @@ export class AuthService {
       user.username,
       metadata,
     );
+
+    this.logger.log('Google login successful', 'AuthService', {
+      userId: user.id,
+      email: user.email,
+      ip: metadata.ip,
+    });
 
     return {
       user: {
@@ -451,6 +479,12 @@ export class AuthService {
       metadata,
     );
 
+    this.logger.log('GitHub login successful', 'AuthService', {
+      userId: user.id,
+      email: user.email,
+      ip: metadata.ip,
+    });
+
     return {
       user: {
         id: user.id,
@@ -493,9 +527,11 @@ export class AuthService {
 
     // --- REUSE DETECTION (Automatic Theft Defense) ---
     if (session.tokenHash !== incomingHash) {
-      this.logger.warn(
-        `Refresh token reuse detected for user ${payload.sub}, session ${payload.sid}! Invalidating compromised session.`,
-      );
+      this.logger.warn('Refresh token reuse detected, session terminated', 'AuthService', {
+        userId: payload.sub,
+        sessionId: payload.sid,
+        ip: metadata.ip,
+      });
       // Immediately invalidate this compromised session family
       await this.tokenStorage.deleteSession(payload.sub, payload.sid);
       throw new UnauthorizedException(
@@ -512,13 +548,21 @@ export class AuthService {
     }
 
     // Token Rotation: issue new access token & new refresh token for this session
-    return this.issueTokens(
+    const tokens = await this.issueTokens(
       user.id,
       user.email,
       user.username,
       metadata,
       payload.sid,
     );
+
+    this.logger.log('Token pair rotated successfully', 'AuthService', {
+      userId: user.id,
+      sessionId: payload.sid,
+      ip: metadata.ip,
+    });
+
+    return tokens;
   }
 
   // --- Logout (Single Device) ---
@@ -542,12 +586,15 @@ export class AuthService {
         await this.tokenStorage.blacklistAccessToken(accessJti, remainingSeconds);
       }
     }
+
+    this.logger.log('User logged out', 'AuthService', { userId, sessionId });
   }
 
   // --- Logout All Devices (Global Revocation) ---
 
   async logoutAll(userId: string): Promise<void> {
     await this.tokenStorage.revokeAllUserTokens(userId);
+    this.logger.log('All user sessions revoked', 'AuthService', { userId });
   }
 
   // --- Change Password ---
@@ -569,6 +616,7 @@ export class AuthService {
 
     const isMatch = await this.verifyPassword(user.password, dto.oldPassword);
     if (!isMatch) {
+      this.logger.warn('Password change failed: incorrect current password', 'AuthService', { userId });
       throw new UnauthorizedException('Current password does not match');
     }
 
@@ -581,6 +629,8 @@ export class AuthService {
 
     // Revoke all existing sessions and tokens for security
     await this.tokenStorage.revokeAllUserTokens(userId);
+
+    this.logger.log('Password updated successfully and all sessions revoked', 'AuthService', { userId });
   }
 
   // --- Get User Profile ---

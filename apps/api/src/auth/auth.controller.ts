@@ -23,10 +23,14 @@ import {
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtAccessPayload, AuthTokens } from './interfaces/jwt-payload.interface';
+import { LoggerService } from '../logger/logger.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly logger: LoggerService,
+  ) {}
 
   private extractMetadata(req: Request) {
     const ip =
@@ -84,6 +88,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const metadata = this.extractMetadata(req);
+    this.logger.log('Incoming signup request', 'AuthController', { email: dto.email, ip: metadata.ip });
     const result = await this.authService.signUp(dto, metadata);
     this.setAuthCookies(res, result.tokens);
     return result;
@@ -98,6 +103,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const metadata = this.extractMetadata(req);
+    this.logger.log('Incoming signin request', 'AuthController', { identifier: dto.emailOrUsername, ip: metadata.ip });
     const result = await this.authService.signIn(dto, metadata);
     this.setAuthCookies(res, result.tokens);
     return result;
@@ -112,6 +118,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const metadata = this.extractMetadata(req);
+    this.logger.log('Incoming Google OAuth request', 'AuthController', { ip: metadata.ip });
     const result = await this.authService.signInWithGoogle(dto, metadata);
     this.setAuthCookies(res, result.tokens);
     return result;
@@ -126,6 +133,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const metadata = this.extractMetadata(req);
+    this.logger.log('Incoming GitHub OAuth request', 'AuthController', { ip: metadata.ip });
     const result = await this.authService.signInWithGithub(dto, metadata);
     this.setAuthCookies(res, result.tokens);
     return result;
@@ -139,6 +147,9 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    const metadata = this.extractMetadata(req);
+    this.logger.log('Incoming refresh token request', 'AuthController', { ip: metadata.ip });
+
     const refreshToken =
       dto.refreshToken || req.cookies?.['refresh_token'];
 
@@ -146,7 +157,6 @@ export class AuthController {
       throw new UnauthorizedException('Refresh token is required');
     }
 
-    const metadata = this.extractMetadata(req);
     const tokens = await this.authService.refreshTokens(refreshToken, metadata);
     this.setAuthCookies(res, tokens);
     return { tokens };
@@ -159,6 +169,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    this.logger.log('User logout request', 'AuthController', { userId: user.sub });
     const sessionId = req.headers['x-session-id'] as string | undefined;
     await this.authService.logout(user.sub, sessionId, user.jti, user.exp);
     this.clearAuthCookies(res);
@@ -171,6 +182,7 @@ export class AuthController {
     @CurrentUser('sub') userId: string,
     @Res({ passthrough: true }) res: Response,
   ) {
+    this.logger.log('User logout-all request', 'AuthController', { userId });
     await this.authService.logoutAll(userId);
     this.clearAuthCookies(res);
     return { message: 'Logged out from all devices successfully' };
@@ -178,6 +190,7 @@ export class AuthController {
 
   @Get('me')
   async getMe(@CurrentUser('sub') userId: string) {
+    this.logger.debug('Fetching current user profile', 'AuthController', { userId });
     return this.authService.getMe(userId);
   }
 
@@ -188,6 +201,7 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    this.logger.log('Password change request', 'AuthController', { userId });
     await this.authService.changePassword(userId, dto);
     this.clearAuthCookies(res);
     return {
