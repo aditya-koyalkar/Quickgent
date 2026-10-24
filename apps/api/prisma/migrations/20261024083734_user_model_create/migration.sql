@@ -6,8 +6,10 @@ CREATE TABLE "users" (
     "id" TEXT NOT NULL,
     "username" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
-    "authProvider" "AuthProvider" NOT NULL,
+    "password" TEXT,
+    "authProvider" "AuthProvider" NOT NULL DEFAULT 'CREDENTIALS',
+    "providerId" TEXT,
+    "avatarUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

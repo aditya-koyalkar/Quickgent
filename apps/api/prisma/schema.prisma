@@ -20,14 +20,16 @@ enum AuthProvider {
 
 
 model User {
-  id String @id @default(uuid())
-  username String @unique
-  email String @unique
-  password String
-  authProvider AuthProvider
+  id           String       @id @default(uuid())
+  username     String       @unique
+  email        String       @unique
+  password     String?
+  authProvider AuthProvider @default(CREDENTIALS)
+  providerId   String?
+  avatarUrl    String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@map("users")
 }

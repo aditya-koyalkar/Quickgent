@@ -33,4 +33,7 @@ Thumbs.db
 .ruff_cache/
 .mypy_cache/
 
-/generated/prisma
+# Prisma generated client
+generated/
+**/generated/
+**/prisma/generated/
