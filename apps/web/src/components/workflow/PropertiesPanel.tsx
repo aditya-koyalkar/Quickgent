@@ -572,10 +572,12 @@ export function PropertiesPanel({
 
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <label className="text-[10px] text-neutral-400">Field</label>
+                          <label className="text-[10px] text-neutral-400">Evaluate Field</label>
                           <input
                             type="text"
+                            list={`fields_list_${node.id}`}
                             value={cond.sourceField || ''}
+                            placeholder="e.g. agent_output"
                             onChange={(e) => {
                               const updated = [...(config.conditions || [])];
                               updated[idx] = { ...cond, sourceField: e.target.value };
@@ -583,6 +585,13 @@ export function PropertiesPanel({
                             }}
                             className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 font-mono text-[11px] text-white"
                           />
+                          <datalist id={`fields_list_${node.id}`}>
+                            <option value="agent_output" />
+                            <option value="user_message" />
+                            <option value="llm_output" />
+                            <option value="session_id" />
+                            <option value="http_response" />
+                          </datalist>
                         </div>
                         <div>
                           <label className="text-[10px] text-neutral-400">Operator</label>
@@ -620,24 +629,43 @@ export function PropertiesPanel({
                         />
                       </div>
 
-                      <div>
-                        <label className="text-[10px] text-neutral-400">Target Route</label>
-                        <select
-                          value={cond.targetRouteId || ''}
-                          onChange={(e) => {
-                            const updated = [...(config.conditions || [])];
-                            updated[idx] = { ...cond, targetRouteId: e.target.value };
-                            handleUpdateConfig('conditions', updated);
-                          }}
-                          className="w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-[11px] text-sky-400 font-medium"
-                        >
-                          {(config.routes || []).map((r: any) => (
-                            <option key={r.id} value={r.id}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      {(() => {
+                        const isTargetValid = (config.routes || []).some((r: any) => r.id === cond.targetRouteId);
+                        return (
+                          <div>
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="text-neutral-400">Target Route</span>
+                              {!isTargetValid && (
+                                <span className="text-red-400 font-bold">⚠️ Route not found in branches</span>
+                              )}
+                            </div>
+                            <select
+                              value={cond.targetRouteId || ''}
+                              onChange={(e) => {
+                                const updated = [...(config.conditions || [])];
+                                updated[idx] = { ...cond, targetRouteId: e.target.value };
+                                handleUpdateConfig('conditions', updated);
+                              }}
+                              className={`w-full rounded border px-2 py-1 text-[11px] font-medium ${
+                                isTargetValid
+                                  ? 'border-neutral-800 bg-neutral-950 text-sky-400'
+                                  : 'border-red-500 bg-red-950/40 text-red-300 ring-1 ring-red-500'
+                              }`}
+                            >
+                              {!isTargetValid && (
+                                <option value={cond.targetRouteId}>
+                                  ⚠️ Invalid: "{cond.targetRouteId}" (Select valid branch below)
+                                </option>
+                              )}
+                              {(config.routes || []).map((r: any) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

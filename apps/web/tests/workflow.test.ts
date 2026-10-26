@@ -166,6 +166,51 @@ describe('Graph Validation Rules', () => {
     const res = validateWorkflow(graph);
     expect(res.issues.some((i) => i.id === 'issue_graph_cycle')).toBe(true);
   });
+
+  it('detects condition rules targeting invalid/non-existent routes as validation errors', () => {
+    const graph: WorkflowGraph = {
+      name: 'Mismatched Routes Workflow',
+      version: '1.0.0',
+      status: 'DRAFT',
+      nodes: [
+        { id: 's1', type: 'start', title: 'Start', position: { x: 0, y: 0 }, data: { label: 'Start', config: {} } },
+        {
+          id: 'c1',
+          type: 'condition',
+          title: 'Condition Router',
+          position: { x: 100, y: 0 },
+          data: {
+            label: 'Condition',
+            config: {
+              routes: [
+                { id: 'route_refund', label: 'Refund' },
+                { id: 'route_other', label: 'Other' },
+              ],
+              conditions: [
+                {
+                  id: 'rule_1',
+                  sourceField: '', // empty source field
+                  operator: 'equals',
+                  comparisonValue: 'refund',
+                  targetRouteId: 'route_technical', // does NOT exist in routes!
+                },
+              ],
+            },
+          },
+        },
+        { id: 'e1', type: 'end', title: 'End', position: { x: 300, y: 0 }, data: { label: 'End', config: {} } },
+      ],
+      edges: [
+        { id: 'e1', source: 's1', target: 'c1' },
+        { id: 'e2', source: 'c1', target: 'e1' },
+      ],
+    };
+
+    const res = validateWorkflow(graph);
+    expect(res.isValid).toBe(false);
+    expect(res.issues.some((i) => i.id.startsWith('issue_cond_invalid_target_'))).toBe(true);
+    expect(res.issues.some((i) => i.id.startsWith('issue_cond_empty_field_'))).toBe(true);
+  });
 });
 
 describe('Workflow Runtime Engine & Execution Traces', () => {

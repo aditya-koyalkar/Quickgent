@@ -246,6 +246,43 @@ export function validateWorkflow(graph: WorkflowGraph | CanonicalWorkflow): Work
         });
       }
 
+      // Check condition rules integrity (valid targetRouteId and sourceField)
+      const validRouteIds = new Set(routes.map((r: any) => r.id));
+      conditions.forEach((cond: any, cIdx: number) => {
+        if (!cond.targetRouteId || !validRouteIds.has(cond.targetRouteId)) {
+          issues.push({
+            id: `issue_cond_invalid_target_${node.id}_${cond.id || cIdx}`,
+            nodeId: node.id,
+            severity: 'error',
+            field: 'targetRouteId',
+            message: `Condition Rule #${cIdx + 1} in "${title}" targets an unknown route ("${cond.targetRouteId}").`,
+            suggestion: `Reassign Rule #${cIdx + 1} to one of the defined routes: [${routes.map((r: any) => r.label).join(', ')}].`,
+          });
+        }
+        if (!cond.sourceField?.trim()) {
+          issues.push({
+            id: `issue_cond_empty_field_${node.id}_${cond.id || cIdx}`,
+            nodeId: node.id,
+            severity: 'error',
+            field: 'sourceField',
+            message: `Condition Rule #${cIdx + 1} in "${title}" has an empty source field.`,
+            suggestion: 'Specify which state variable (e.g. agent_output or user_message) to evaluate.',
+          });
+        }
+      });
+
+      // Check if default fallback route is valid
+      if (config.defaultRoute && !validRouteIds.has(config.defaultRoute) && config.defaultRoute !== 'fallback') {
+        issues.push({
+          id: `issue_cond_invalid_default_${node.id}`,
+          nodeId: node.id,
+          severity: 'warning',
+          field: 'defaultRoute',
+          message: `Fallback route "${config.defaultRoute}" in "${title}" is not recognized among defined routes.`,
+          suggestion: 'Select a valid fallback route from defined branch routes.',
+        });
+      }
+
       // Check if all routes have outgoing edges
       const nodeOutEdges = edges.filter((e) => e.source === node.id);
       routes.forEach((route: any) => {
