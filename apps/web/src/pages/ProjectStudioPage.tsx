@@ -1,4 +1,4 @@
-import React, {
+import {
   useState,
   useRef,
   useEffect,
@@ -6,12 +6,11 @@ import React, {
   useMemo,
   type MouseEvent,
   type WheelEvent,
-  type KeyboardEvent,
+  type DragEvent,
 } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft,
-  Bot,
   Play,
   Save,
   Code2,
@@ -22,926 +21,104 @@ import {
   Trash2,
   Send,
   Loader2,
-  Wrench,
-  CheckCircle2,
-  Cpu,
-  Copy,
   Check,
-  X,
-  Database,
-  Code,
-  UserCheck,
-  GitFork,
-  Sliders,
-  Split,
-  Globe,
-  Shield,
-  HardDrive,
-  Download,
-  AlertCircle,
+  Copy,
   RefreshCw,
-  Layers,
-  ZoomIn,
-  ZoomOut,
+  Rocket,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
 import type {
   WorkflowNode,
   WorkflowEdge,
   WorkflowGraph,
-  NodeType,
-  RouteOption,
-  InputParameter,
+  CoreNodeType,
+  PublishedVersion,
+  ValidationIssue,
 } from '../types/workflow';
+import { NODE_REGISTRY } from '../lib/workflow/registry';
+import {
+  deserializeFromCanonical,
+  createDefaultCanonicalWorkflow,
+} from '../lib/workflow/canonical';
+import { validateWorkflow } from '../lib/workflow/validation';
+import { generateWorkflowFromPrompt } from '../lib/workflow/copilot';
+import { NodeLibrary } from '../components/workflow/NodeLibrary';
+import { PropertiesPanel } from '../components/workflow/PropertiesPanel';
+import { ValidationPanel } from '../components/workflow/ValidationPanel';
+import { TestPanel } from '../components/workflow/TestPanel';
+import { PublishModal } from '../components/workflow/PublishModal';
+import { CanvasMinimap } from '../components/workflow/CanvasMinimap';
+import { JsonModal } from '../components/workflow/JsonModal';
 
 // ── Node Dimension Constants ──────────────────────────────────────────
-export const NODE_WIDTH = 230;
-export const NODE_HEIGHT = 86;
-
-// ── Helper: Node Category Meta & Visual Styling ───────────────────────
-export function getNodeMeta(type: NodeType) {
-  switch (type) {
-    case 'start':
-      return {
-        icon: <CheckCircle2 className="size-3 text-emerald-400" />,
-        border: 'border-emerald-500/50',
-        badge: 'bg-emerald-950/70 text-emerald-300 border border-emerald-800/40',
-        accent: '#10b981',
-        category: 'Control Flow',
-      };
-    case 'classifier':
-      return {
-        icon: <Split className="size-3 text-sky-400" />,
-        border: 'border-sky-500/50',
-        badge: 'bg-sky-950/70 text-sky-300 border border-sky-800/40',
-        accent: '#38bdf8',
-        category: 'Control Flow',
-      };
-    case 'condition':
-      return {
-        icon: <GitFork className="size-3 text-orange-400" />,
-        border: 'border-orange-500/50',
-        badge: 'bg-orange-950/70 text-orange-300 border border-orange-800/40',
-        accent: '#fb923c',
-        category: 'Control Flow',
-      };
-    case 'end':
-      return {
-        icon: <CheckCircle2 className="size-3 text-neutral-400" />,
-        border: 'border-neutral-600/50',
-        badge: 'bg-neutral-800 text-neutral-300 border border-neutral-700/40',
-        accent: '#a1a1aa',
-        category: 'Control Flow',
-      };
-    case 'agent':
-      return {
-        icon: <Bot className="size-3 text-brand-400" />,
-        border: 'border-brand-500/50',
-        badge: 'bg-brand-950/70 text-brand-300 border border-brand-800/40',
-        accent: '#818cf8',
-        category: 'AI & Intelligence',
-      };
-    case 'llm':
-      return {
-        icon: <Cpu className="size-3 text-purple-400" />,
-        border: 'border-purple-500/50',
-        badge: 'bg-purple-950/70 text-purple-300 border border-purple-800/40',
-        accent: '#c084fc',
-        category: 'AI & Intelligence',
-      };
-    case 'rag':
-      return {
-        icon: <Database className="size-3 text-cyan-400" />,
-        border: 'border-cyan-500/50',
-        badge: 'bg-cyan-950/70 text-cyan-300 border border-cyan-800/40',
-        accent: '#22d3ee',
-        category: 'AI & Intelligence',
-      };
-    case 'tool':
-      return {
-        icon: <Wrench className="size-3 text-amber-400" />,
-        border: 'border-amber-500/50',
-        badge: 'bg-amber-950/70 text-amber-300 border border-amber-800/40',
-        accent: '#fbbf24',
-        category: 'Tools & APIs',
-      };
-    case 'api_request':
-      return {
-        icon: <Globe className="size-3 text-teal-400" />,
-        border: 'border-teal-500/50',
-        badge: 'bg-teal-950/70 text-teal-300 border border-teal-800/40',
-        accent: '#2dd4bf',
-        category: 'Tools & APIs',
-      };
-    case 'transform':
-      return {
-        icon: <Code className="size-3 text-fuchsia-400" />,
-        border: 'border-fuchsia-500/50',
-        badge: 'bg-fuchsia-950/70 text-fuchsia-300 border border-fuchsia-800/40',
-        accent: '#e879f9',
-        category: 'Tools & APIs',
-      };
-    case 'guardrail':
-      return {
-        icon: <Shield className="size-3 text-rose-400" />,
-        border: 'border-rose-500/50',
-        badge: 'bg-rose-950/70 text-rose-300 border border-rose-800/40',
-        accent: '#fb7185',
-        category: 'Safety & State',
-      };
-    case 'memory':
-      return {
-        icon: <HardDrive className="size-3 text-indigo-400" />,
-        border: 'border-indigo-500/50',
-        badge: 'bg-indigo-950/70 text-indigo-300 border border-indigo-800/40',
-        accent: '#818cf8',
-        category: 'Safety & State',
-      };
-    case 'human':
-      return {
-        icon: <UserCheck className="size-3 text-pink-400" />,
-        border: 'border-pink-500/50',
-        badge: 'bg-pink-950/70 text-pink-300 border border-pink-800/40',
-        accent: '#f472b6',
-        category: 'Safety & State',
-      };
-  }
-}
-
-// ── Default Initial Graph (Customer Concierge Flow) ───────────────────
-export const DEFAULT_INITIAL_GRAPH: WorkflowGraph = {
-  name: 'Customer Concierge Flow',
-  version: '0.1.0',
-  status: 'DRAFT',
-  nodes: [
-    {
-      id: 'node-start',
-      type: 'start',
-      title: 'Incoming Message',
-      position: { x: 380, y: 50 },
-      data: {
-        label: 'Incoming Message',
-        sublabel: '01 / START',
-        description: 'Receives customer question & session ID',
-        outputVar: 'user_message',
-        inputParams: [
-          { name: 'user_message', type: 'string', required: true, description: 'Customer query' },
-          { name: 'session_id', type: 'string', required: true, description: 'Active session UUID' },
-        ],
-      },
-    },
-    {
-      id: 'node-classifier',
-      type: 'classifier',
-      title: 'Intent Classifier',
-      position: { x: 380, y: 190 },
-      data: {
-        label: 'Intent Classifier',
-        sublabel: '02 / ROUTER',
-        description: 'Routes by intent: Technical vs Billing',
-        inputVar: 'user_message',
-        classifierMode: 'semantic',
-        routes: [
-          { id: 'r1', label: 'Technical Issue', targetNodeId: 'node-tech-agent' },
-          { id: 'r2', label: 'Billing & Invoice', targetNodeId: 'node-billing-agent' },
-        ],
-        fallbackRoute: 'General Inquiries',
-      },
-    },
-    {
-      id: 'node-tech-agent',
-      type: 'agent',
-      title: 'Technical Support Agent',
-      position: { x: 200, y: 350 },
-      data: {
-        label: 'Technical Support Agent',
-        sublabel: '03 / AGENT',
-        description: 'Claude 3.5 Sonnet · Vector DB attached',
-        model: 'claude-3-5-sonnet',
-        temperature: 0.2,
-        maxSteps: 6,
-        systemPrompt:
-          'You are a senior technical support engineer. Inspect errors and provide exact solutions.',
-        tools: ['knowledge_base'],
-        outputVar: 'tech_solution',
-      },
-    },
-    {
-      id: 'node-billing-agent',
-      type: 'agent',
-      title: 'Billing Concierge',
-      position: { x: 560, y: 350 },
-      data: {
-        label: 'Billing Concierge',
-        sublabel: '03 / AGENT',
-        description: 'GPT-4o mini · Stripe API tool',
-        model: 'gpt-4o-mini',
-        temperature: 0.1,
-        maxSteps: 4,
-        systemPrompt:
-          'You handle billing, receipts, subscription tiers, and refund verification.',
-        tools: ['custom_api'],
-        outputVar: 'billing_response',
-      },
-    },
-    {
-      id: 'node-human-check',
-      type: 'human',
-      title: 'Refund Approval',
-      position: { x: 560, y: 500 },
-      data: {
-        label: 'Human Review',
-        sublabel: '04 / OVERSIGHT',
-        description: 'Supervisory check for refunds > $50',
-        approvalPrompt: 'Customer requested subscription refund over $50. Approve payout?',
-        timeoutMinutes: 30,
-        timeoutAction: 'escalate',
-      },
-    },
-    {
-      id: 'node-end',
-      type: 'end',
-      title: 'Return Output',
-      position: { x: 380, y: 650 },
-      data: {
-        label: 'Return Output',
-        sublabel: '05 / END',
-        description: 'Streams response back to customer channel',
-        endResponseTemplate: '{{agent_output}}',
-        endDeliveryType: 'chat_message',
-      },
-    },
-  ],
-  edges: [
-    { id: 'e1', source: 'node-start', target: 'node-classifier' },
-    { id: 'e2', source: 'node-classifier', target: 'node-tech-agent', label: 'Technical Issue' },
-    { id: 'e3', source: 'node-classifier', target: 'node-billing-agent', label: 'Billing & Invoice' },
-    { id: 'e4', source: 'node-tech-agent', target: 'node-end' },
-    { id: 'e5', source: 'node-billing-agent', target: 'node-human-check' },
-    { id: 'e6', source: 'node-human-check', target: 'node-end' },
-  ],
-};
-
-// ── Blueprint Templates ───────────────────────────────────────────────
-export const TEMPLATES: Record<
-  string,
-  { name: string; description: string; graph: WorkflowGraph }
-> = {
-  intent_router: {
-    name: 'Multi-Agent Intent Router',
-    description: 'Classifier routing between specialized tech and billing agents',
-    graph: DEFAULT_INITIAL_GRAPH,
-  },
-  rag_researcher: {
-    name: 'RAG Knowledge Synthesis',
-    description: 'Vector search retrieval pipeline with GPT-4o synthesis',
-    graph: {
-      name: 'RAG Knowledge Synthesis',
-      version: '0.1.0',
-      status: 'DRAFT',
-      nodes: [
-        {
-          id: 'n-start',
-          type: 'start',
-          title: 'Research Query',
-          position: { x: 380, y: 50 },
-          data: {
-            label: 'Research Query',
-            sublabel: '01 / START',
-            outputVar: 'query',
-            inputParams: [{ name: 'query', type: 'string', required: true }],
-          },
-        },
-        {
-          id: 'n-rag',
-          type: 'rag',
-          title: 'Vector Knowledge Retrieval',
-          position: { x: 380, y: 190 },
-          data: {
-            label: 'Vector Knowledge Base',
-            sublabel: '02 / RAG',
-            ragCollection: 'company_documentation',
-            queryTemplate: '{query}',
-            topK: 4,
-            similarityThreshold: 0.8,
-            outputVar: 'retrieved_docs',
-          },
-        },
-        {
-          id: 'n-agent',
-          type: 'agent',
-          title: 'Synthesizer Agent',
-          position: { x: 380, y: 340 },
-          data: {
-            label: 'Synthesizer Agent',
-            sublabel: '03 / AGENT',
-            model: 'gpt-4o',
-            tools: ['web_search'],
-            systemPrompt: 'Synthesize internal docs and live web search findings into a coherent report.',
-            outputVar: 'final_report',
-          },
-        },
-        {
-          id: 'n-end',
-          type: 'end',
-          title: 'Deliver Report',
-          position: { x: 380, y: 490 },
-          data: {
-            label: 'Deliver Report',
-            sublabel: '04 / END',
-            endResponseTemplate: '{{final_report}}',
-          },
-        },
-      ],
-      edges: [
-        { id: 're1', source: 'n-start', target: 'n-rag' },
-        { id: 're2', source: 'n-rag', target: 'n-agent' },
-        { id: 're3', source: 'n-agent', target: 'n-end' },
-      ],
-    },
-  },
-  safety_guardrail: {
-    name: 'Safety Guardrailed Pipeline',
-    description: 'Content moderation filter with state memory and agent loop',
-    graph: {
-      name: 'Safety Guardrailed Pipeline',
-      version: '0.1.0',
-      status: 'DRAFT',
-      nodes: [
-        {
-          id: 'sg-start',
-          type: 'start',
-          title: 'User Input',
-          position: { x: 380, y: 50 },
-          data: { label: 'User Input', sublabel: 'START', outputVar: 'user_prompt' },
-        },
-        {
-          id: 'sg-guard',
-          type: 'guardrail',
-          title: 'Prompt Injection & Safety Filter',
-          position: { x: 380, y: 180 },
-          data: {
-            label: 'Safety Guardrail',
-            sublabel: 'FILTER',
-            guardrailRules: ['injection', 'pii', 'toxic'],
-            moderationAction: 'block',
-          },
-        },
-        {
-          id: 'sg-agent',
-          type: 'agent',
-          title: 'Safe Task Agent',
-          position: { x: 380, y: 320 },
-          data: {
-            label: 'Task Agent',
-            sublabel: 'AGENT',
-            model: 'gpt-4o-mini',
-            outputVar: 'agent_res',
-          },
-        },
-        {
-          id: 'sg-mem',
-          type: 'memory',
-          title: 'Conversation Memory Store',
-          position: { x: 380, y: 460 },
-          data: {
-            label: 'State Store',
-            sublabel: 'MEMORY',
-            stateAction: 'write',
-            stateKey: 'chat_history',
-          },
-        },
-        {
-          id: 'sg-end',
-          type: 'end',
-          title: 'Safe Output Stream',
-          position: { x: 380, y: 600 },
-          data: { label: 'Return Result', sublabel: 'END' },
-        },
-      ],
-      edges: [
-        { id: 'sge1', source: 'sg-start', target: 'sg-guard' },
-        { id: 'sge2', source: 'sg-guard', target: 'sg-agent' },
-        { id: 'sge3', source: 'sg-agent', target: 'sg-mem' },
-        { id: 'sge4', source: 'sg-mem', target: 'sg-end' },
-      ],
-    },
-  },
-};
-
-// ── LangGraph Canonical Specification ─────────────────────────────────
-export interface LangGraphCompiled {
-  __schema__: 'langgraph_v1';
-  name: string;
-  version: string;
-  entry_point: string;
-  nodes: Record<
-    string,
-    {
-      id: string;
-      type: NodeType;
-      title: string;
-      output_var?: string;
-      config: Record<string, any>;
-    }
-  >;
-  edges: Array<{
-    source: string;
-    target: string;
-  }>;
-  conditional_edges: Array<{
-    source: string;
-    condition_type: 'intent_classifier' | 'expression_evaluator' | 'branch_router';
-    routing_key?: string;
-    expression?: string;
-    routes: Record<string, string>;
-    fallback?: string;
-  }>;
-  state_schema: Record<string, string>;
-}
-
-// ── Compiler: Convert Visual Graph into LangGraph Execution JSON ──────
-export function compileLangGraphJSON(graph: WorkflowGraph): LangGraphCompiled {
-  const startNode = graph.nodes.find((n) => n.type === 'start');
-  const firstEdge = graph.edges.find((e) => e.source === startNode?.id);
-  const entry_point = firstEdge?.target || startNode?.id || graph.nodes[0]?.id || 'entry';
-
-  // 1. Process Nodes
-  const nodesMap: LangGraphCompiled['nodes'] = {};
-  graph.nodes.forEach((n) => {
-    const config: Record<string, any> = {};
-    if (n.type === 'agent') {
-      config.model = n.data.model || 'gpt-4o-mini';
-      config.temperature = n.data.temperature ?? 0.3;
-      config.max_steps = n.data.maxSteps ?? 5;
-      config.system_prompt = n.data.systemPrompt;
-      config.tools = n.data.tools || [];
-      config.memory_type = n.data.memoryType || 'buffer';
-    } else if (n.type === 'llm') {
-      config.model = n.data.model || 'gpt-4o-mini';
-      config.temperature = n.data.temperature ?? 0.2;
-      config.max_tokens = n.data.maxTokens ?? 1024;
-      config.response_format = n.data.responseFormat || 'text';
-      config.system_prompt = n.data.systemPrompt;
-      config.user_prompt = n.data.userPrompt;
-    } else if (n.type === 'classifier') {
-      config.classifier_mode = n.data.classifierMode || 'semantic';
-      config.input_var = n.data.inputVar || 'user_message';
-      if (n.data.classifierPrompt) {
-        config.classification_prompt = n.data.classifierPrompt;
-      }
-      config.routes = n.data.routes || [];
-      config.fallback_route = n.data.fallbackRoute || 'default';
-    } else if (n.type === 'condition') {
-      config.expression = n.data.conditionExpr || 'true';
-      config.true_branch = n.data.trueBranchLabel || 'TRUE';
-      config.false_branch = n.data.falseBranchLabel || 'FALSE';
-    } else if (n.type === 'tool') {
-      config.tool_type = n.data.toolType || 'web_search';
-      config.description = n.data.description;
-      config.tool_config = n.data.toolConfig || {};
-    } else if (n.type === 'rag') {
-      config.collection = n.data.ragCollection || 'knowledge_base';
-      config.query_template = n.data.queryTemplate || '{user_message}';
-      config.top_k = n.data.topK ?? 3;
-      config.similarity_threshold = n.data.similarityThreshold ?? 0.75;
-    } else if (n.type === 'api_request') {
-      config.method = n.data.apiMethod || 'POST';
-      config.url = n.data.apiUrl || '';
-      config.headers = n.data.apiHeaders;
-      config.body = n.data.apiBody;
-    } else if (n.type === 'guardrail') {
-      config.rules = n.data.guardrailRules || ['injection', 'pii'];
-      config.action = n.data.moderationAction || 'block';
-    } else if (n.type === 'memory') {
-      config.action = n.data.stateAction || 'read';
-      config.state_key = n.data.stateKey || 'session_state';
-    } else if (n.type === 'transform') {
-      config.code = n.data.transformCode || 'return input;';
-    } else if (n.type === 'human') {
-      config.approval_prompt = n.data.approvalPrompt;
-      config.timeout_minutes = n.data.timeoutMinutes ?? 60;
-      config.timeout_action = n.data.timeoutAction || 'escalate';
-    } else if (n.type === 'start') {
-      config.input_parameters = n.data.inputParams || [];
-    } else if (n.type === 'end') {
-      config.response_template = n.data.endResponseTemplate || '{{agent_output}}';
-      config.delivery_channel = n.data.endDeliveryType || 'chat_message';
-    }
-
-    nodesMap[n.id] = {
-      id: n.id,
-      type: n.type,
-      title: n.title,
-      output_var: n.data.outputVar,
-      config,
-    };
-  });
-
-  // 2. Identify Conditional vs Standard Edges
-  const standardEdges: LangGraphCompiled['edges'] = [];
-  const conditionalNodesMap: Record<
-    string,
-    {
-      source: string;
-      condition_type: 'intent_classifier' | 'expression_evaluator' | 'branch_router';
-      routing_key?: string;
-      expression?: string;
-      routes: Record<string, string>;
-      fallback?: string;
-    }
-  > = {};
-
-  graph.edges.forEach((edge) => {
-    const src = graph.nodes.find((n) => n.id === edge.source);
-    if (!src) return;
-
-    if (src.type === 'classifier' || src.type === 'condition' || Boolean(edge.label)) {
-      if (!conditionalNodesMap[src.id]) {
-        conditionalNodesMap[src.id] = {
-          source: src.id,
-          condition_type:
-            src.type === 'classifier'
-              ? 'intent_classifier'
-              : src.type === 'condition'
-              ? 'expression_evaluator'
-              : 'branch_router',
-          routing_key: src.data.inputVar || 'user_message',
-          expression: src.data.conditionExpr,
-          routes: {},
-          fallback: src.data.fallbackRoute || 'default',
-        };
-      }
-      const label = edge.label || `route_${Object.keys(conditionalNodesMap[src.id].routes).length + 1}`;
-      conditionalNodesMap[src.id].routes[label] = edge.target;
-    } else {
-      standardEdges.push({ source: edge.source, target: edge.target });
-    }
-  });
-
-  // 3. Dynamic State Schema Extraction
-  const stateSchema: Record<string, string> = {
-    messages: 'list[BaseMessage]',
-  };
-  if (startNode?.data.inputParams) {
-    startNode.data.inputParams.forEach((param) => {
-      stateSchema[param.name] = param.type === 'number' ? 'int' : param.type === 'boolean' ? 'bool' : 'str';
-    });
-  }
-  graph.nodes.forEach((n) => {
-    if (n.data.outputVar) {
-      stateSchema[n.data.outputVar] = 'str';
-    }
-    if (n.data.stateKey) {
-      stateSchema[n.data.stateKey] = 'dict';
-    }
-  });
-
-  return {
-    __schema__: 'langgraph_v1',
-    name: graph.name || 'Untitled Workflow',
-    version: graph.version || '0.1.0',
-    entry_point,
-    nodes: nodesMap,
-    edges: standardEdges,
-    conditional_edges: Object.values(conditionalNodesMap),
-    state_schema: stateSchema,
-  };
-}
-
-// ── Workflow Graph Validation ─────────────────────────────────────────
-export function validateWorkflow(graph: WorkflowGraph): {
-  isValid: boolean;
-  issues: string[];
-} {
-  const issues: string[] = [];
-  const startNodes = graph.nodes.filter((n) => n.type === 'start');
-  const endNodes = graph.nodes.filter((n) => n.type === 'end');
-
-  if (startNodes.length === 0) {
-    issues.push('Missing Start Trigger node (required entry point).');
-  } else if (startNodes.length > 1) {
-    issues.push('Multiple Start Trigger nodes detected. Only one is allowed.');
-  }
-
-  if (endNodes.length === 0) {
-    issues.push('Missing End Return node (workflow must have a terminus).');
-  }
-
-  if (graph.nodes.length > 1) {
-    const connectedNodeIds = new Set<string>();
-    graph.edges.forEach((e) => {
-      connectedNodeIds.add(e.source);
-      connectedNodeIds.add(e.target);
-    });
-    graph.nodes.forEach((n) => {
-      if (!connectedNodeIds.has(n.id)) {
-        issues.push(`Disconnected node: "${n.title}" has no connections.`);
-      }
-    });
-  }
-
-  return {
-    isValid: issues.length === 0,
-    issues,
-  };
-}
-
-// ── Smart JSON Import (LangGraph Spec or Visual Studio JSON) ──────────
-export function importWorkflowJSON(rawText: string): WorkflowGraph {
-  const parsed = JSON.parse(rawText);
-
-  // Check if it is a raw Studio WorkflowGraph
-  if (Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
-    return parsed as WorkflowGraph;
-  }
-
-  // Check if it is a LangGraphCompiled format
-  if (parsed.__schema__ === 'langgraph_v1' || parsed.nodes) {
-    const nodes: WorkflowNode[] = [];
-    const edges: WorkflowEdge[] = [];
-    const rawNodes = parsed.nodes;
-
-    let index = 0;
-    const nodeIds = Object.keys(rawNodes);
-
-    nodeIds.forEach((id) => {
-      const nodeDef = rawNodes[id];
-      const type: NodeType = nodeDef.type || 'agent';
-      const col = index % 3;
-      const row = Math.floor(index / 3);
-
-      nodes.push({
-        id: nodeDef.id || id,
-        type,
-        title: nodeDef.title || id,
-        position: { x: 180 + col * 280, y: 60 + row * 160 },
-        data: {
-          label: nodeDef.title || id,
-          sublabel: type.toUpperCase(),
-          outputVar: nodeDef.output_var,
-          ...(nodeDef.config || {}),
-        },
-      });
-      index++;
-    });
-
-    if (Array.isArray(parsed.edges)) {
-      parsed.edges.forEach((e: any, i: number) => {
-        edges.push({
-          id: `imp-e-${i}`,
-          source: e.source,
-          target: e.target,
-        });
-      });
-    }
-
-    if (Array.isArray(parsed.conditional_edges)) {
-      parsed.conditional_edges.forEach((ce: any, i: number) => {
-        if (ce.routes) {
-          Object.entries(ce.routes).forEach(([label, targetId], ri) => {
-            edges.push({
-              id: `imp-ce-${i}-${ri}`,
-              source: ce.source,
-              target: targetId as string,
-              label,
-            });
-          });
-        }
-      });
-    }
-
-    return {
-      name: parsed.name || 'Imported LangGraph Workflow',
-      version: parsed.version || '1.0.0',
-      status: 'DRAFT',
-      nodes,
-      edges,
-    };
-  }
-
-  throw new Error('Unsupported JSON format. Expected LangGraph v1 schema or Studio Graph state.');
-}
-
-// ── Reusable Form Input Sub-components ─────────────────────────────────
-function InputField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-  fontMono = false,
-}: {
-  label: string;
-  value: string | number;
-  onChange: (val: string) => void;
-  placeholder?: string;
-  type?: string;
-  fontMono?: boolean;
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-neutral-400 mb-1">{label}</label>
-      <input
-        type={type}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`w-full rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none ${
-          fontMono ? 'font-mono text-[11px]' : ''
-        }`}
-      />
-    </div>
-  );
-}
-
-function SelectField<T extends string>({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: T;
-  onChange: (val: T) => void;
-  options: { label: string; value: T }[];
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-neutral-400 mb-1">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as T)}
-        className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-white focus:border-brand-500 focus:outline-none"
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value} className="bg-neutral-900 text-white">
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function TextareaField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  rows = 3,
-  fontMono = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (val: string) => void;
-  placeholder?: string;
-  rows?: number;
-  fontMono?: boolean;
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-neutral-400 mb-1">{label}</label>
-      <textarea
-        rows={rows}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`w-full rounded-lg border border-neutral-800 bg-neutral-900 p-2 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none ${
-          fontMono ? 'font-mono text-[11px]' : ''
-        }`}
-      />
-    </div>
-  );
-}
-
-function SliderField({
-  label,
-  value,
-  min,
-  max,
-  step = 0.05,
-  unit = '',
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  unit?: string;
-  onChange: (val: number) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between text-[11px] font-medium text-neutral-400 mb-1">
-        <span>{label}</span>
-        <span className="font-mono text-white">
-          {value}
-          {unit}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full accent-brand-500 cursor-pointer"
-      />
-    </div>
-  );
-}
-
-// ── Palette Categorization List ───────────────────────────────────────
-export const PALETTE_CATEGORIES: {
-  name: string;
-  items: { type: NodeType; title: string; desc: string }[];
-}[] = [
-  {
-    name: 'Control Flow',
-    items: [
-      { type: 'start', title: 'Input Trigger', desc: 'Entry point for user message & payload' },
-      { type: 'classifier', title: 'Intent Classifier', desc: 'Semantic routing to branch agents' },
-      { type: 'condition', title: 'Condition Rule', desc: 'Boolean IF/ELSE branch evaluation' },
-      { type: 'end', title: 'Return Output', desc: 'Final response delivery channel' },
-    ],
-  },
-  {
-    name: 'AI & Intelligence',
-    items: [
-      { type: 'agent', title: 'Autonomous Agent', desc: 'Iterative ReAct loop with tools' },
-      { type: 'llm', title: 'Prompt Completion', desc: 'Single-pass model inference' },
-      { type: 'rag', title: 'Vector Knowledge', desc: 'Embeddings search & document fetch' },
-    ],
-  },
-  {
-    name: 'Tools & APIs',
-    items: [
-      { type: 'tool', title: 'External Tool', desc: 'Web search, SQL, or code execution' },
-      { type: 'api_request', title: 'HTTP / Webhook', desc: 'External REST API integration' },
-      { type: 'transform', title: 'Code Transform', desc: 'Custom JavaScript data mapping' },
-    ],
-  },
-  {
-    name: 'Safety & State',
-    items: [
-      { type: 'guardrail', title: 'Safety Guardrail', desc: 'Content moderation & injection check' },
-      { type: 'memory', title: 'Memory Store', desc: 'Session memory read & write' },
-      { type: 'human', title: 'Human Review', desc: 'Approval gate before sensitive action' },
-    ],
-  },
-];
+export const NODE_WIDTH = 240;
+export const NODE_HEIGHT = 92;
 
 export default function ProjectStudioPage() {
   const { id: projectId = '' } = useParams<{ id: string }>();
-  const { data: project, isLoading } = useProject(projectId);
+  const { data: project } = useProject(projectId);
   const updateProjectMutation = useUpdateProject();
 
-  // Workflow State
-  const [graph, setGraph] = useState<WorkflowGraph>(DEFAULT_INITIAL_GRAPH);
+  // Workflow State & Undo/Redo History
+  const [graph, setGraph] = useState<WorkflowGraph>(() =>
+    deserializeFromCanonical(createDefaultCanonicalWorkflow()),
+  );
+  const [history, setHistory] = useState<WorkflowGraph[]>([]);
+  const [future, setFuture] = useState<WorkflowGraph[]>([]);
+
+  // Selection & Connection State
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [isConnectingFrom, setIsConnectingFrom] = useState<string | null>(null);
+  const [connectingFrom, setConnectingFrom] = useState<{
+    nodeId: string;
+    handleId?: string;
+    handleLabel?: string;
+  } | null>(null);
 
-  // Pan & Zoom Virtual Viewport
-  const [pan, setPan] = useState({ x: 140, y: 50 });
+  // Pan & Zoom Viewport
+  const [pan, setPan] = useState({ x: 120, y: 40 });
   const [zoom, setZoom] = useState(1.0);
+  const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 });
 
   // Drawers & Modals
-  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(true);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
-  const [isCopilotOpen, setIsCopilotOpen] = useState(true);
+  const [isValidationOpen, setIsValidationOpen] = useState(false);
+  const [isTestPanelOpen, setIsTestPanelOpen] = useState(false);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
-  const [jsonModalTab, setJsonModalTab] = useState<'langgraph' | 'studio' | 'import'>('langgraph');
-  const [importText, setImportText] = useState('');
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isCopied, setIsCopied] = useState(false);
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+
+  // Highlighting during testing
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+
+  // Project Title & Status
+  const [projectName, setProjectName] = useState('Customer Support Agent');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  // Editable Project Name
-  const [projectName, setProjectName] = useState('Untitled Project');
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  // Publishing Versions Storage
+  const [publishedVersions, setPublishedVersions] = useState<PublishedVersion[]>([]);
 
   // AI Copilot Chat State
   const [chatInput, setChatInput] = useState('');
-  const [isAiGenerating, setIsAiGenerating] = useState(false);
-  const [messages, setMessages] = useState<
+  const [isCopilotGenerating, setIsCopilotGenerating] = useState(false);
+  const [copilotMessages, setCopilotMessages] = useState<
     Array<{
       id: string;
       role: 'user' | 'assistant';
       content: string;
       suggestedGraph?: WorkflowGraph;
-      timestamp: Date;
+      highlights?: string[];
     }>
   >([
     {
-      id: 'init-1',
+      id: 'init_copilot',
       role: 'assistant',
       content:
-        'Hello! I am your LangGraph workflow architect. Ask me to design multi-agent systems, add RAG pipelines, or configure intent routing.',
-      timestamp: new Date(),
+        'Hello! I can architect and generate AI workflows for you. Describe your goal (e.g. "Create a customer refund triage agent with API lookup") or pick a template.',
     },
   ]);
 
@@ -952,20 +129,67 @@ export default function ProjectStudioPage() {
   const draggingNodeIdRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
 
-  // Sync Project Data from Backend
+  // Update Viewport Size on Resize
+  useEffect(() => {
+    function updateSize() {
+      if (canvasRef.current) {
+        const rect = canvasRef.current.getBoundingClientRect();
+        setViewportSize({ width: rect.width, height: rect.height });
+      }
+    }
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  // Update Graph with History Push
+  const updateGraphWithHistory = useCallback(
+    (updater: (prev: WorkflowGraph) => WorkflowGraph) => {
+      setGraph((prev) => {
+        const next = updater(prev);
+        setHistory((hist) => [...hist.slice(-25), prev]);
+        setFuture([]);
+        return next;
+      });
+    },
+    [],
+  );
+
+  // Undo / Redo
+  const handleUndo = useCallback(() => {
+    if (history.length === 0) return;
+    const previous = history[history.length - 1];
+    setHistory((hist) => hist.slice(0, -1));
+    setFuture((fut) => [graph, ...fut]);
+    setGraph(previous);
+  }, [history, graph]);
+
+  const handleRedo = useCallback(() => {
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture((fut) => fut.slice(1));
+    setHistory((hist) => [...hist, graph]);
+    setGraph(next);
+  }, [future, graph]);
+
+  // Load from LocalStorage or Backend
   useEffect(() => {
     if (project?.name) {
       setProjectName(project.name);
     }
     if (project?.workflows?.[0]?.graph) {
       try {
-        const loaded = project.workflows[0].graph as unknown as WorkflowGraph;
+        const loaded = project.workflows[0].graph as any;
         if (loaded.nodes && loaded.edges) {
-          setGraph(loaded);
+          if (loaded.schemaVersion === '1.0.0') {
+            setGraph(deserializeFromCanonical(loaded));
+          } else {
+            setGraph(loaded);
+          }
           return;
         }
       } catch {
-        // Fallback
+        // fallback
       }
     }
 
@@ -977,57 +201,39 @@ export default function ProjectStudioPage() {
           setGraph(parsed);
         }
       }
+      const savedVersions = localStorage.getItem(`quickgent_versions_${projectId}`);
+      if (savedVersions) {
+        setPublishedVersions(JSON.parse(savedVersions));
+      }
     } catch {
       // ignore
     }
   }, [project, projectId]);
 
-  // Live Compiled LangGraph Specification & Validation
+  // Autosave Draft to LocalStorage with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [graph, projectId]);
+
+  // Validation
   const validation = useMemo(() => validateWorkflow(graph), [graph]);
-  const compiledLangGraph = useMemo(() => compileLangGraphJSON(graph), [graph]);
   const selectedNode = useMemo(
     () => graph.nodes.find((n) => n.id === selectedNodeId) || null,
     [graph.nodes, selectedNodeId],
   );
 
-  // ── Handlers ─────────────────────────────────────────────────────────
-
-  const handleSaveTitle = () => {
-    setIsEditingTitle(false);
-    if (projectName.trim() && projectName !== project?.name) {
-      updateProjectMutation.mutate({
-        id: projectId,
-        data: { name: projectName.trim() },
-      });
-    }
-  };
-
-  const handleSaveWorkflow = () => {
-    setSaveStatus('saving');
-    try {
-      localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
-    } catch {
-      // ignore storage quota issues
-    }
-
-    if (projectName.trim() && projectName !== project?.name) {
-      updateProjectMutation.mutate({
-        id: projectId,
-        data: { name: projectName.trim() },
-      });
-    }
-
-    setTimeout(() => {
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2500);
-    }, 400);
-  };
-
-  // Fit View: Compute Bounding Box and Center Viewport
+  // Fit View
   const handleFitView = useCallback(() => {
     if (graph.nodes.length === 0 || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    const padding = 70;
+    const padding = 80;
 
     const minX = Math.min(...graph.nodes.map((n) => n.position.x));
     const maxX = Math.max(...graph.nodes.map((n) => n.position.x + NODE_WIDTH));
@@ -1051,12 +257,76 @@ export default function ProjectStudioPage() {
     setZoom(newZoom);
   }, [graph.nodes]);
 
-  // Duplicate Selected Node
+  // Node Management Handlers
+  const handleAddNode = (type: CoreNodeType, dropPos?: { x: number; y: number }) => {
+    const reg = NODE_REGISTRY[type];
+    const newId = `node_${type}_${Date.now().toString().slice(-4)}`;
+
+    let posX = 380;
+    let posY = 240;
+
+    if (dropPos) {
+      posX = dropPos.x;
+      posY = dropPos.y;
+    } else if (canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      posX = Math.round((rect.width / 2 - pan.x) / zoom - NODE_WIDTH / 2);
+      posY = Math.round((rect.height / 2 - pan.y) / zoom - NODE_HEIGHT / 2);
+    }
+
+    const newNode: WorkflowNode = {
+      id: newId,
+      type,
+      title: reg.label,
+      position: { x: Math.max(40, posX), y: Math.max(40, posY) },
+      data: {
+        label: reg.label,
+        sublabel: reg.sublabel,
+        description: reg.description,
+        config: { ...reg.defaultConfig },
+      },
+    };
+
+    updateGraphWithHistory((prev) => ({
+      ...prev,
+      nodes: [...prev.nodes, newNode],
+    }));
+
+    setSelectedNodeId(newId);
+    setSelectedEdgeId(null);
+  };
+
+  const handleUpdateNode = (nodeId: string, updates: Partial<WorkflowNode>) => {
+    setGraph((prev) => ({
+      ...prev,
+      nodes: prev.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        return {
+          ...n,
+          ...updates,
+          data: {
+            ...n.data,
+            ...(updates.data || {}),
+          },
+        };
+      }),
+    }));
+  };
+
+  const handleDeleteNode = (nodeId: string) => {
+    updateGraphWithHistory((prev) => ({
+      ...prev,
+      nodes: prev.nodes.filter((n) => n.id !== nodeId),
+      edges: prev.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
+    }));
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
+  };
+
   const handleDuplicateNode = (nodeId: string) => {
     const src = graph.nodes.find((n) => n.id === nodeId);
     if (!src) return;
 
-    const newId = `node-${src.type}-${Date.now().toString().slice(-4)}`;
+    const newId = `node_${src.type}_${Date.now().toString().slice(-4)}`;
     const duplicated: WorkflowNode = {
       ...src,
       id: newId,
@@ -1068,197 +338,127 @@ export default function ProjectStudioPage() {
       data: {
         ...src.data,
         label: `${src.data.label} (Copy)`,
-        routes: src.data.routes?.map((r) => ({
-          ...r,
-          id: `r-${Date.now().toString().slice(-4)}-${Math.random().toString(36).slice(2, 5)}`,
-        })),
+        config: JSON.parse(JSON.stringify(src.data.config || {})),
       },
     };
 
-    setGraph((prev) => ({
+    updateGraphWithHistory((prev) => ({
       ...prev,
       nodes: [...prev.nodes, duplicated],
     }));
     setSelectedNodeId(newId);
-    setSelectedEdgeId(null);
-  };
-
-  // Add Node from Palette at Current Viewport Center
-  const handleAddNode = (type: NodeType) => {
-    const newId = `node-${type}-${Date.now().toString().slice(-4)}`;
-    const titles: Record<NodeType, string> = {
-      start: 'Input Trigger',
-      classifier: 'Intent Classifier',
-      agent: 'Autonomous Agent',
-      llm: 'Prompt Completion',
-      rag: 'Vector Knowledge',
-      tool: 'External Tool',
-      api_request: 'HTTP / Webhook',
-      guardrail: 'Safety Guardrail',
-      memory: 'State Memory Store',
-      condition: 'Condition Evaluator',
-      transform: 'Code Transform',
-      human: 'Human Review',
-      end: 'Return Output',
-    };
-
-    let posX = 380;
-    let posY = 260;
-    if (canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      posX = Math.round((rect.width / 2 - pan.x) / zoom - NODE_WIDTH / 2);
-      posY = Math.round((rect.height / 2 - pan.y) / zoom - NODE_HEIGHT / 2);
-    }
-
-    const newNode: WorkflowNode = {
-      id: newId,
-      type,
-      title: titles[type],
-      position: { x: Math.max(40, posX), y: Math.max(40, posY) },
-      data: {
-        label: titles[type],
-        sublabel: type.toUpperCase(),
-        description: `${type} node configuration`,
-        outputVar: `${type}_output`,
-        ...(type === 'start' && {
-          inputParams: [
-            { name: 'user_message', type: 'string', required: true, description: 'Customer query' },
-            { name: 'session_id', type: 'string', required: false, description: 'Client session ID' },
-          ],
-        }),
-        ...(type === 'agent' && {
-          model: 'gpt-4o-mini',
-          temperature: 0.3,
-          maxSteps: 5,
-          tools: ['web_search'],
-          memoryType: 'buffer',
-          systemPrompt:
-            'You are an autonomous AI agent. Use your available tools iteratively to solve the user query.',
-        }),
-        ...(type === 'llm' && {
-          model: 'gpt-4o-mini',
-          temperature: 0.2,
-          maxTokens: 1024,
-          responseFormat: 'text',
-          systemPrompt: 'You are a concise, helpful assistant.',
-          userPrompt: 'Process the following input: {user_message}',
-        }),
-        ...(type === 'classifier' && {
-          classifierMode: 'semantic',
-          inputVar: 'user_message',
-          routes: [
-            { id: 'r1', label: 'Technical Issue' },
-            { id: 'r2', label: 'Billing & Invoice' },
-          ],
-          fallbackRoute: 'General Inquiries',
-        }),
-        ...(type === 'condition' && {
-          conditionExpr: 'confidence >= 0.80',
-          trueBranchLabel: 'TRUE',
-          falseBranchLabel: 'FALSE',
-        }),
-        ...(type === 'tool' && {
-          toolType: 'web_search',
-          description: 'Search the live web for real-time information.',
-        }),
-        ...(type === 'api_request' && {
-          apiMethod: 'POST',
-          apiUrl: 'https://api.example.com/v1/webhook',
-          apiHeaders: '{\n  "Content-Type": "application/json"\n}',
-          apiBody: '{\n  "query": "{{user_message}}"\n}',
-        }),
-        ...(type === 'rag' && {
-          ragCollection: 'company_documentation',
-          queryTemplate: '{user_message}',
-          topK: 3,
-          similarityThreshold: 0.75,
-        }),
-        ...(type === 'guardrail' && {
-          guardrailRules: ['injection', 'pii', 'toxic'],
-          moderationAction: 'block',
-        }),
-        ...(type === 'memory' && {
-          stateAction: 'read',
-          stateKey: 'user_profile',
-        }),
-        ...(type === 'transform' && {
-          transformCode: 'return { output: input.text.trim() };',
-        }),
-        ...(type === 'human' && {
-          approvalPrompt: 'Please review and approve this action.',
-          timeoutMinutes: 60,
-          timeoutAction: 'escalate',
-        }),
-        ...(type === 'end' && {
-          endResponseTemplate: '{{agent_output}}',
-          endDeliveryType: 'chat_message',
-        }),
-      },
-    };
-
-    setGraph((prev) => ({
-      ...prev,
-      nodes: [...prev.nodes, newNode],
-    }));
-    setSelectedNodeId(newId);
-    setSelectedEdgeId(null);
-  };
-
-  const handleDeleteNode = (nodeId: string) => {
-    setGraph((prev) => ({
-      ...prev,
-      nodes: prev.nodes.filter((n) => n.id !== nodeId),
-      edges: prev.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
-    }));
-    if (selectedNodeId === nodeId) setSelectedNodeId(null);
-  };
-
-  const handleDeleteSelected = () => {
-    if (selectedNodeId) {
-      handleDeleteNode(selectedNodeId);
-    } else if (selectedEdgeId) {
-      setGraph((prev) => ({
-        ...prev,
-        edges: prev.edges.filter((e) => e.id !== selectedEdgeId),
-      }));
-      setSelectedEdgeId(null);
-    }
   };
 
   // Connect Nodes
-  const handleConnectNodes = (sourceId: string, targetId: string) => {
-    setIsConnectingFrom(null);
-    if (!sourceId || !targetId || sourceId === targetId) return;
-
-    // Check if edge already exists
-    const exists = graph.edges.some((e) => e.source === sourceId && e.target === targetId);
-    if (exists) return;
-
-    const sourceNode = graph.nodes.find((n) => n.id === sourceId);
-    let edgeLabel: string | undefined = undefined;
-
-    if (sourceNode?.type === 'classifier') {
-      const existingOut = graph.edges.filter((e) => e.source === sourceId);
-      const routes = sourceNode.data.routes || [];
-      const nextRoute = routes[existingOut.length];
-      edgeLabel = nextRoute ? nextRoute.label : `Route ${existingOut.length + 1}`;
-    } else if (sourceNode?.type === 'condition') {
-      const existingOut = graph.edges.filter((e) => e.source === sourceId);
-      edgeLabel = existingOut.length === 0 ? 'TRUE' : 'FALSE';
+  const handleConnectNodes = (targetId: string) => {
+    if (!connectingFrom || connectingFrom.nodeId === targetId) {
+      setConnectingFrom(null);
+      return;
     }
 
+    const { nodeId: sourceId, handleId, handleLabel } = connectingFrom;
+    setConnectingFrom(null);
+
+    // Prevent duplicate edges
+    const exists = graph.edges.some(
+      (e) =>
+        e.source === sourceId &&
+        e.target === targetId &&
+        (e.sourceHandle === handleId || (!e.sourceHandle && !handleId)),
+    );
+    if (exists) return;
+
     const newEdge: WorkflowEdge = {
-      id: `e-${sourceId}-${targetId}-${Date.now().toString().slice(-4)}`,
+      id: `e_${sourceId}_${targetId}_${Date.now().toString().slice(-4)}`,
       source: sourceId,
       target: targetId,
-      label: edgeLabel,
+      sourceHandle: handleId,
+      label: handleLabel,
     };
 
-    setGraph((prev) => ({
+    updateGraphWithHistory((prev) => ({
       ...prev,
       edges: [...prev.edges, newEdge],
     }));
   };
+
+  // Save Workflow
+  const handleSaveWorkflow = () => {
+    setSaveStatus('saving');
+    try {
+      localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
+    } catch {
+      // ignore
+    }
+
+    if (projectName.trim() && projectName !== project?.name) {
+      updateProjectMutation.mutate({
+        id: projectId,
+        data: { name: projectName.trim() },
+      });
+    }
+
+    setTimeout(() => {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2500);
+    }, 400);
+  };
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      const isInput =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement;
+
+      if (e.key === 'Escape') {
+        setConnectingFrom(null);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        setIsValidationOpen(false);
+        return;
+      }
+
+      if (isInput) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedNodeId) {
+          handleDeleteNode(selectedNodeId);
+        } else if (selectedEdgeId) {
+          updateGraphWithHistory((prev) => ({
+            ...prev,
+            edges: prev.edges.filter((edge) => edge.id !== selectedEdgeId),
+          }));
+          setSelectedEdgeId(null);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveWorkflow();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (selectedNodeId) {
+          handleDuplicateNode(selectedNodeId);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        handleFitView();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeId, selectedEdgeId, graph, handleUndo, handleRedo, handleFitView]);
 
   // Virtual Coordinate Drag & Pan
   const handleNodeMouseDown = (e: MouseEvent, nodeId: string) => {
@@ -1343,109 +543,46 @@ export default function ProjectStudioPage() {
     }
   };
 
-  // Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
-      const isInput =
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement;
+  const handleCanvasDrop = (e: DragEvent) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('application/quickgent-node-type') as CoreNodeType;
+    if (type && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const dropX = Math.round((e.clientX - rect.left - pan.x) / zoom - NODE_WIDTH / 2);
+      const dropY = Math.round((e.clientY - rect.top - pan.y) / zoom - NODE_HEIGHT / 2);
+      handleAddNode(type, { x: dropX, y: dropY });
+    }
+  };
 
-      if (e.key === 'Escape') {
-        setIsConnectingFrom(null);
-        setSelectedNodeId(null);
-        setSelectedEdgeId(null);
-        setIsJsonModalOpen(false);
-        return;
-      }
-
-      if (isInput) return;
-
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
-        handleDeleteSelected();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        if (selectedNodeId) {
-          handleDuplicateNode(selectedNodeId);
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        handleSaveWorkflow();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-        e.preventDefault();
-        handleFitView();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId, selectedEdgeId, graph]);
-
-  // AI Copilot Prompt Handling
-  const handleSendMessage = () => {
-    if (!chatInput.trim() || isAiGenerating) return;
-    const userPrompt = chatInput.trim();
+  // AI Copilot Handler
+  const handleSendCopilotPrompt = () => {
+    if (!chatInput.trim() || isCopilotGenerating) return;
+    const prompt = chatInput.trim();
     setChatInput('');
 
-    const newMsg = {
-      id: `m-${Date.now()}`,
-      role: 'user' as const,
-      content: userPrompt,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, newMsg]);
-    setIsAiGenerating(true);
+    setCopilotMessages((prev) => [
+      ...prev,
+      { id: `user_${Date.now()}`, role: 'user', content: prompt },
+    ]);
+    setIsCopilotGenerating(true);
 
     setTimeout(() => {
-      let suggested: WorkflowGraph | undefined = undefined;
-      let reply = '';
+      const result = generateWorkflowFromPrompt(prompt);
+      const generatedGraph = deserializeFromCanonical(result.workflow);
 
-      const lower = userPrompt.toLowerCase();
-      if (lower.includes('rag') || lower.includes('search') || lower.includes('docs')) {
-        suggested = TEMPLATES.rag_researcher.graph;
-        reply =
-          'Generated a 4-node RAG Research & Synthesis pipeline using Vector Knowledge Retrieval and a GPT-4o synthesis agent.';
-      } else if (lower.includes('guard') || lower.includes('safe') || lower.includes('moderation')) {
-        suggested = TEMPLATES.safety_guardrail.graph;
-        reply =
-          'Generated a Safety Guardrailed Pipeline featuring prompt injection filtering, session memory storage, and agent loop.';
-      } else {
-        suggested = TEMPLATES.intent_router.graph;
-        reply =
-          'Constructed a Multi-Agent Intent Router flow with specialized technical support & billing concierges and human review escalation.';
-      }
-
-      setMessages((prev) => [
+      setCopilotMessages((prev) => [
         ...prev,
         {
-          id: `m-bot-${Date.now()}`,
+          id: `asst_${Date.now()}`,
           role: 'assistant',
-          content: reply,
-          suggestedGraph: suggested,
-          timestamp: new Date(),
+          content: result.explanation,
+          highlights: result.architectureHighlights,
+          suggestedGraph: generatedGraph,
         },
       ]);
-      setIsAiGenerating(false);
-    }, 800);
+      setIsCopilotGenerating(false);
+    }, 600);
   };
-
-  const handleApplyGraph = (newGraph: WorkflowGraph) => {
-    setGraph(newGraph);
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-    setTimeout(() => handleFitView(), 50);
-  };
-
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-neutral-950 text-neutral-400">
-        <div className="flex items-center gap-2.5 text-sm">
-          <Loader2 className="size-4 animate-spin text-brand-400" />
-          Loading project studio…
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-neutral-950 font-sans text-neutral-100 antialiased select-none">
@@ -1469,9 +606,9 @@ export default function ProjectStudioPage() {
               autoFocus
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
-              onBlur={handleSaveTitle}
-              onKeyDown={(e) => e.key === 'Enter' && handleSaveTitle()}
-              className="rounded-lg border border-brand-500 bg-neutral-900 px-2.5 py-1 text-sm font-semibold text-white focus:outline-none ring-1 ring-brand-500/50"
+              onBlur={() => setIsEditingTitle(false)}
+              onKeyDown={(e) => e.key === 'Enter' && setIsEditingTitle(false)}
+              className="rounded-lg border border-brand-500 bg-neutral-900 px-2.5 py-1 text-sm font-semibold text-white focus:outline-none"
             />
           ) : (
             <button
@@ -1484,119 +621,111 @@ export default function ProjectStudioPage() {
             </button>
           )}
 
-          <span className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-neutral-400">
-            {graph.status}
+          <span
+            className={`rounded-md border px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
+              publishedVersions.length > 0
+                ? 'border-emerald-800/40 bg-emerald-950/50 text-emerald-300'
+                : 'border-neutral-800 bg-neutral-900 text-neutral-400'
+            }`}
+          >
+            {publishedVersions.length > 0 ? `LIVE v${publishedVersions[0].version}` : 'DRAFT'}
           </span>
 
-          {/* Graph Validation Badge */}
-          <div
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono border ${
+          {/* Actionable Validation Status Badge */}
+          <button
+            type="button"
+            onClick={() => setIsValidationOpen((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono border transition-all cursor-pointer ${
               validation.isValid
-                ? 'border-emerald-800/40 bg-emerald-950/40 text-emerald-400'
-                : 'border-amber-800/40 bg-amber-950/40 text-amber-400'
+                ? 'border-emerald-800/40 bg-emerald-950/40 text-emerald-400 hover:bg-emerald-950/70'
+                : 'border-amber-800/50 bg-amber-950/50 text-amber-300 hover:bg-amber-950/80 animate-pulse'
             }`}
-            title={validation.issues.join('\n') || 'All nodes properly connected for LangGraph compilation'}
+            title="Click to view graph validation details"
           >
             <span
               className={`size-1.5 rounded-full ${
-                validation.isValid ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'
+                validation.isValid ? 'bg-emerald-400' : 'bg-amber-400'
               }`}
             />
-            <span>{validation.isValid ? 'LangGraph Valid' : `${validation.issues.length} warnings`}</span>
-          </div>
+            <span>
+              {validation.isValid
+                ? 'Graph Valid'
+                : `${validation.summary.errors} errors, ${validation.summary.warnings} warnings`}
+            </span>
+          </button>
         </div>
 
-        {/* Center Quick Add Palette */}
-        <div className="hidden items-center gap-1 rounded-xl border border-neutral-800 bg-neutral-900/80 p-1 lg:flex shadow-xs">
+        {/* Center Quick-Add & Undo/Redo Controls */}
+        <div className="hidden lg:flex items-center gap-1 rounded-xl border border-neutral-800 bg-neutral-900/80 p-1">
           <button
             type="button"
-            onClick={() => handleAddNode('classifier')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Semantic Intent Classifier"
+            onClick={handleUndo}
+            disabled={history.length === 0}
+            className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white disabled:opacity-30 transition-colors"
+            title="Undo (Ctrl+Z)"
           >
-            <Split className="size-3.5 text-sky-400" />
-            + Router
+            <Undo2 className="size-3.5" />
           </button>
           <button
             type="button"
-            onClick={() => handleAddNode('agent')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Autonomous ReAct Agent"
+            onClick={handleRedo}
+            disabled={future.length === 0}
+            className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white disabled:opacity-30 transition-colors"
+            title="Redo (Ctrl+Y)"
           >
-            <Bot className="size-3.5 text-brand-400" />
-            + Agent
+            <Redo2 className="size-3.5" />
           </button>
+          <div className="h-4 w-px bg-neutral-800 mx-1" />
           <button
             type="button"
             onClick={() => handleAddNode('llm')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Single-pass LLM Inference"
+            className="rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
           >
-            <Cpu className="size-3.5 text-purple-400" />
             + LLM
           </button>
           <button
             type="button"
-            onClick={() => handleAddNode('rag')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Vector Knowledge Base Retrieval"
+            onClick={() => handleAddNode('agent')}
+            className="rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
           >
-            <Database className="size-3.5 text-cyan-400" />
-            + RAG
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAddNode('tool')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="External Tool Integration"
-          >
-            <Wrench className="size-3.5 text-amber-400" />
-            + Tool
+            + Agent
           </button>
           <button
             type="button"
             onClick={() => handleAddNode('condition')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Boolean Condition Branch"
+            className="rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
           >
-            <GitFork className="size-3.5 text-orange-400" />
-            + Rule
+            + Condition
           </button>
           <button
             type="button"
-            onClick={() => handleAddNode('human')}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
-            title="Human in the loop approval gate"
+            onClick={() => handleAddNode('http_request')}
+            className="rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
           >
-            <UserCheck className="size-3.5 text-pink-400" />
-            + Human
+            + HTTP Tool
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddNode('structured_output')}
+            className="rounded-lg px-2 py-1 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
+          >
+            + Structured Out
           </button>
         </div>
 
-        {/* Right Action Buttons */}
+        {/* Right Primary Action Controls */}
         <div className="flex items-center gap-2">
-          {/* Fit View Shortcut */}
-          <button
-            type="button"
-            onClick={handleFitView}
-            className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs font-medium text-neutral-400 hover:border-neutral-700 hover:text-white transition-colors"
-            title="Fit to View (Ctrl+0)"
-          >
-            <Maximize2 className="size-3.5" />
-            Fit
-          </button>
-
-          {/* JSON Graph Spec Modal */}
+          {/* JSON Spec Modal Button */}
           <button
             type="button"
             onClick={() => setIsJsonModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-700 hover:text-white"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-300 hover:border-neutral-700 hover:text-white transition-colors"
           >
             <Code2 className="size-3.5 text-brand-400" />
-            LangGraph JSON
+            Canonical JSON
           </button>
 
-          {/* AI Copilot Drawer Toggle */}
+          {/* AI Copilot Toggle */}
           <button
             type="button"
             onClick={() => setIsCopilotOpen((v) => !v)}
@@ -1610,13 +739,37 @@ export default function ProjectStudioPage() {
             AI Copilot
           </button>
 
-          {/* Save Workflow to Backend */}
+          {/* Test Workflow Button */}
+          <button
+            type="button"
+            onClick={() => setIsTestPanelOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+              isTestPanelOpen
+                ? 'bg-sky-600 text-white shadow-sky-500/20 shadow-md'
+                : 'border border-neutral-800 bg-neutral-900 text-neutral-300 hover:bg-neutral-800'
+            }`}
+          >
+            <Play className="size-3.5 fill-current" />
+            Test Flow
+          </button>
+
+          {/* Publish Button */}
+          <button
+            type="button"
+            onClick={() => setIsPublishModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-200 hover:border-neutral-700 hover:text-white transition-colors"
+          >
+            <Rocket className="size-3.5 text-emerald-400" />
+            Publish
+          </button>
+
+          {/* Save Button */}
           <button
             type="button"
             onClick={handleSaveWorkflow}
             disabled={saveStatus === 'saving'}
             className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-950 shadow-sm transition-all hover:bg-neutral-200 disabled:opacity-50"
-            title="Save workflow (Ctrl+S)"
+            title="Save workflow draft (Ctrl+S)"
           >
             {saveStatus === 'saving' ? (
               <>
@@ -1640,70 +793,12 @@ export default function ProjectStudioPage() {
 
       {/* ── Main Workspace Body ────────────────────────────────────────── */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* ── Left Collapsible Node Palette ────────────────────────────── */}
-        <aside
-          className={`shrink-0 border-r border-neutral-800 bg-neutral-950/80 backdrop-blur-md transition-all duration-200 flex flex-col z-20 ${
-            isLeftSidebarOpen ? 'w-64' : 'w-12'
-          }`}
-        >
-          {/* Palette Header */}
-          <div className="flex h-10 items-center justify-between border-b border-neutral-800/80 px-3">
-            {isLeftSidebarOpen && (
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-                Node Library
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setIsLeftSidebarOpen((v) => !v)}
-              className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white"
-              title={isLeftSidebarOpen ? 'Collapse library' : 'Expand library'}
-            >
-              <Layers className="size-3.5" />
-            </button>
-          </div>
-
-          {/* Palette Categorized Items */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-4">
-            {PALETTE_CATEGORIES.map((category) => (
-              <div key={category.name} className="space-y-1">
-                {isLeftSidebarOpen && (
-                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                    {category.name}
-                  </div>
-                )}
-                {category.items.map((item) => {
-                  const meta = getNodeMeta(item.type);
-                  return (
-                    <button
-                      key={item.type}
-                      type="button"
-                      onClick={() => handleAddNode(item.type)}
-                      title={item.desc}
-                      className={`w-full flex items-center gap-2.5 rounded-lg border border-neutral-800/80 bg-neutral-900/50 p-2 text-left transition-all hover:border-neutral-700 hover:bg-neutral-800/70 group ${
-                        !isLeftSidebarOpen ? 'justify-center p-2.5' : ''
-                      }`}
-                    >
-                      <div className="size-6 shrink-0 rounded-md bg-neutral-800/80 flex items-center justify-center group-hover:scale-105 transition-transform">
-                        {meta.icon}
-                      </div>
-                      {isLeftSidebarOpen && (
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-neutral-200 group-hover:text-white truncate">
-                            {item.title}
-                          </div>
-                          <div className="text-[10px] text-neutral-400 truncate">
-                            {item.desc}
-                          </div>
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </aside>
+        {/* Left Searchable Node Palette */}
+        <NodeLibrary
+          isOpen={isLibraryOpen}
+          onToggle={() => setIsLibraryOpen((v) => !v)}
+          onAddNode={(type) => handleAddNode(type)}
+        />
 
         {/* ── Main Virtual Canvas ──────────────────────────────────────── */}
         <div
@@ -1712,33 +807,38 @@ export default function ProjectStudioPage() {
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
           onWheel={handleCanvasWheel}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleCanvasDrop}
           onClick={() => {
-            if (isConnectingFrom) {
-              setIsConnectingFrom(null);
+            if (connectingFrom) {
+              setConnectingFrom(null);
             } else {
               setSelectedNodeId(null);
               setSelectedEdgeId(null);
             }
           }}
-          className="relative flex-1 select-none overflow-hidden bg-[#090b0e] cursor-grab active:cursor-grabbing"
+          className="relative flex-1 select-none overflow-hidden bg-[#0a0d12] cursor-grab active:cursor-grabbing"
           style={{
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.08) 1.2px, transparent 1.2px)',
+            backgroundImage:
+              'radial-gradient(circle, rgba(255,255,255,0.08) 1.2px, transparent 1.2px)',
             backgroundPosition: `${pan.x}px ${pan.y}px`,
             backgroundSize: `${26 * zoom}px ${26 * zoom}px`,
           }}
         >
           {/* Active Connection Notice Banner */}
-          {isConnectingFrom && (
+          {connectingFrom && (
             <div className="absolute top-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-sky-500/50 bg-sky-950/90 px-4 py-1.5 text-xs font-medium text-sky-200 shadow-xl backdrop-blur-md flex items-center gap-2">
               <span className="size-2 rounded-full bg-sky-400 animate-ping" />
               <span>
-                Connecting from <strong className="text-white underline">{isConnectingFrom}</strong>
+                Connecting from{' '}
+                <strong className="text-white underline">{connectingFrom.nodeId}</strong>
+                {connectingFrom.handleLabel && ` (${connectingFrom.handleLabel})`}
               </span>
-              <span className="text-neutral-400">· Click any target node to link (Esc to cancel)</span>
+              <span className="text-neutral-400">· Click any target node to connect (Esc to cancel)</span>
             </div>
           )}
 
-          {/* Virtual Scaled Canvas Container */}
+          {/* Scaled Virtual Canvas Container */}
           <div
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
@@ -1749,7 +849,7 @@ export default function ProjectStudioPage() {
               pointerEvents: 'none',
             }}
           >
-            {/* SVG Connecting Bezier Edges */}
+            {/* SVG Bezier Edges */}
             <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
               <defs>
                 <marker
@@ -1783,7 +883,7 @@ export default function ProjectStudioPage() {
 
                 const isSelected = selectedEdgeId === edge.id;
                 const isConditional =
-                  Boolean(edge.label) || srcNode.type === 'classifier' || srcNode.type === 'condition';
+                  Boolean(edge.label) || srcNode.type === 'condition' || Boolean(edge.sourceHandle);
 
                 const sx = srcNode.position.x + NODE_WIDTH / 2;
                 const sy = srcNode.position.y + NODE_HEIGHT;
@@ -1797,7 +897,7 @@ export default function ProjectStudioPage() {
 
                 return (
                   <g key={edge.id} className="pointer-events-auto">
-                    {/* Wider transparent hit-test line for easy selection */}
+                    {/* Transparent Hit Target */}
                     <path
                       d={pathD}
                       fill="none"
@@ -1811,7 +911,7 @@ export default function ProjectStudioPage() {
                       className="cursor-pointer"
                     />
 
-                    {/* Visible Bezier Curve */}
+                    {/* Visible Line */}
                     <path
                       d={pathD}
                       fill="none"
@@ -1827,7 +927,7 @@ export default function ProjectStudioPage() {
                       }}
                     />
 
-                    {/* Route Label Pill */}
+                    {/* Branch Label */}
                     {edge.label && (
                       <foreignObject
                         x={midX - 75}
@@ -1858,11 +958,12 @@ export default function ProjectStudioPage() {
               })}
             </svg>
 
-            {/* Interactive Graph Node Cards */}
+            {/* Interactive Node Cards */}
             {graph.nodes.map((node) => {
               const isSelected = selectedNodeId === node.id;
-              const isConnecting = isConnectingFrom === node.id;
-              const meta = getNodeMeta(node.type);
+              const isConnecting = connectingFrom?.nodeId === node.id;
+              const isTestingActive = highlightedNodeId === node.id;
+              const def = NODE_REGISTRY[node.type] || NODE_REGISTRY.agent;
 
               return (
                 <div
@@ -1870,11 +971,12 @@ export default function ProjectStudioPage() {
                   onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (isConnectingFrom && isConnectingFrom !== node.id) {
-                      handleConnectNodes(isConnectingFrom, node.id);
+                    if (connectingFrom && connectingFrom.nodeId !== node.id) {
+                      handleConnectNodes(node.id);
                     } else {
                       setSelectedNodeId(node.id);
                       setSelectedEdgeId(null);
+                      setIsInspectorOpen(true);
                     }
                   }}
                   style={{
@@ -1882,37 +984,44 @@ export default function ProjectStudioPage() {
                     width: `${NODE_WIDTH}px`,
                   }}
                   className={`group pointer-events-auto absolute rounded-xl border p-3 shadow-xl transition-all cursor-move select-none ${
-                    isSelected
+                    isTestingActive
+                      ? 'border-brand-400 bg-brand-950/40 ring-4 ring-brand-400/60 shadow-brand-500/20'
+                      : isSelected
                       ? 'border-brand-400 bg-neutral-900 ring-2 ring-brand-400/40 shadow-brand-500/10'
                       : isConnecting
                       ? 'border-sky-400 bg-neutral-900 ring-2 ring-sky-400/30'
                       : 'border-neutral-800 bg-neutral-950/95 hover:border-neutral-700'
                   }`}
                 >
-                  {/* Top Target Handle Dot */}
-                  <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 size-3 rounded-full border border-neutral-700 bg-neutral-900 flex items-center justify-center">
-                    <div
-                      className={`size-1.5 rounded-full ${
-                        isConnectingFrom && isConnectingFrom !== node.id
-                          ? 'bg-sky-400 animate-ping'
-                          : 'bg-neutral-500'
-                      }`}
-                    />
-                  </div>
+                  {/* Top Target Handle */}
+                  {def.hasInputHandle && (
+                    <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 size-3 rounded-full border border-neutral-700 bg-neutral-900 flex items-center justify-center">
+                      <div
+                        className={`size-1.5 rounded-full ${
+                          connectingFrom && connectingFrom.nodeId !== node.id
+                            ? 'bg-sky-400 animate-ping'
+                            : 'bg-neutral-500'
+                        }`}
+                      />
+                    </div>
+                  )}
 
-                  {/* Header Row: Badge + Quick Hover Action Buttons */}
+                  {/* Header Row */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      {meta.icon}
-                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider ${meta.badge}`}>
-                        {node.data.sublabel || node.type}
+                      {def.icon}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider ${def.badgeClass}`}
+                      >
+                        {node.data?.sublabel || def.sublabel}
                       </span>
                     </div>
 
+                    {/* Quick Hover Controls */}
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
-                        title="Duplicate node (Ctrl+D)"
+                        title="Duplicate (Ctrl+D)"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDuplicateNode(node.id);
@@ -1923,7 +1032,7 @@ export default function ProjectStudioPage() {
                       </button>
                       <button
                         type="button"
-                        title="Delete node (Del)"
+                        title="Delete (Del)"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteNode(node.id);
@@ -1932,62 +1041,86 @@ export default function ProjectStudioPage() {
                       >
                         <Trash2 className="size-3" />
                       </button>
-                      <button
-                        type="button"
-                        title="Connect edge..."
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsConnectingFrom(node.id);
-                        }}
-                        className="size-5 rounded-full bg-brand-600 flex items-center justify-center text-white hover:bg-brand-500 shadow-xs"
-                      >
-                        <Plus className="size-3" />
-                      </button>
                     </div>
                   </div>
 
-                  {/* Node Title */}
+                  {/* Title */}
                   <div className="mt-1.5 text-xs font-semibold text-white truncate">
                     {node.title}
                   </div>
 
-                  {/* Node Metadata / Parameters Preview */}
+                  {/* Config Preview Summary */}
                   <div className="mt-0.5 text-[10px] font-mono text-neutral-400 truncate">
-                    {node.type === 'agent' && (node.data.model || 'Autonomous ReAct')}
-                    {node.type === 'llm' && `${node.data.model || 'gpt-4o-mini'} · ${node.data.responseFormat || 'text'}`}
-                    {node.type === 'classifier' &&
-                      `${node.data.routes?.length || 0} routes · ${node.data.classifierMode || 'semantic'}`}
-                    {node.type === 'condition' && (node.data.conditionExpr || 'IF / ELSE branch')}
-                    {node.type === 'rag' &&
-                      `${node.data.ragCollection || 'knowledge_base'} (topK: ${node.data.topK || 3})`}
-                    {node.type === 'tool' && (node.data.toolType || 'web_search')}
-                    {node.type === 'api_request' && `${node.data.apiMethod || 'POST'} ${node.data.apiUrl || ''}`}
-                    {node.type === 'guardrail' && (node.data.guardrailRules?.join(', ') || 'Safety filters')}
-                    {node.type === 'memory' && `${node.data.stateAction || 'read'} -> ${node.data.stateKey || 'session'}`}
-                    {node.type === 'human' && `Timeout: ${node.data.timeoutMinutes || 60}m`}
-                    {node.type === 'start' && `${node.data.inputParams?.length || 0} input parameters`}
-                    {node.type === 'end' && (node.data.endDeliveryType || 'chat_message')}
-                    {node.type === 'transform' && 'Code transformation'}
+                    {node.type === 'start' &&
+                      `${node.data?.config?.inputFields?.length || 0} input fields`}
+                    {node.type === 'llm' &&
+                      `${node.data?.config?.model || 'gpt-4o-mini'} · ${
+                        node.data?.config?.responseFormat || 'text'
+                      }`}
+                    {node.type === 'agent' &&
+                      `${node.data?.config?.model || 'gpt-4o'} (${
+                        node.data?.config?.availableTools?.length || 0
+                      } tools)`}
+                    {node.type === 'condition' &&
+                      `${node.data?.config?.routes?.length || 0} routes · ${
+                        node.data?.config?.conditions?.length || 0
+                      } rules`}
+                    {node.type === 'http_request' &&
+                      `${node.data?.config?.method || 'POST'} ${node.data?.config?.url || ''}`}
+                    {node.type === 'transform' &&
+                      `${node.data?.config?.assignments?.length || 0} state mappings`}
+                    {node.type === 'structured_output' && 'JSON Schema validation'}
+                    {node.type === 'end' &&
+                      `Delivery: ${node.data?.config?.responseFormat || 'json'}`}
                   </div>
 
-                  {/* Bottom Source Handle Button */}
-                  <button
-                    type="button"
-                    title="Click to connect edge"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsConnectingFrom(node.id);
-                    }}
-                    className="absolute -bottom-2 left-1/2 -translate-x-1/2 size-4 rounded-full border border-neutral-700 bg-neutral-900 hover:border-brand-400 hover:bg-brand-600 text-neutral-400 hover:text-white flex items-center justify-center transition-colors shadow-xs"
-                  >
-                    <Plus className="size-2.5" />
-                  </button>
+                  {/* Bottom Source Handle */}
+                  {def.hasOutputHandle && node.type !== 'condition' && (
+                    <button
+                      type="button"
+                      title="Connect to next step"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConnectingFrom({ nodeId: node.id });
+                      }}
+                      className="absolute -bottom-2 left-1/2 -translate-x-1/2 size-4 rounded-full border border-neutral-700 bg-neutral-900 hover:border-brand-400 hover:bg-brand-600 text-neutral-400 hover:text-white flex items-center justify-center transition-colors shadow-xs"
+                    >
+                      <Plus className="size-2.5" />
+                    </button>
+                  )}
+
+                  {/* Condition Node Branch Output Handles */}
+                  {node.type === 'condition' && (
+                    <div className="absolute -bottom-3 left-0 right-0 flex justify-center gap-1.5 px-2">
+                      {(node.data?.config?.routes || [
+                        { id: 'route_1', label: 'Route 1' },
+                        { id: 'route_2', label: 'Route 2' },
+                      ]).map((route: any) => (
+                        <button
+                          key={route.id}
+                          type="button"
+                          title={`Connect branch "${route.label}"`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConnectingFrom({
+                              nodeId: node.id,
+                              handleId: route.id,
+                              handleLabel: route.label,
+                            });
+                          }}
+                          className="rounded-full border border-neutral-700 bg-neutral-900 hover:border-sky-400 hover:bg-sky-600 text-[8px] font-mono px-1.5 py-0.5 text-neutral-300 hover:text-white shadow-xs transition-colors"
+                        >
+                          {route.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Floating Canvas Controls (Bottom-Left) */}
+          {/* Floating Canvas Zoom & Viewport Controls (Bottom-Left) */}
           <div className="absolute bottom-5 left-5 z-20 flex items-center gap-1.5 rounded-xl border border-neutral-800 bg-neutral-950/90 p-1 backdrop-blur-md shadow-xl">
             <button
               type="button"
@@ -2013,7 +1146,7 @@ export default function ProjectStudioPage() {
               type="button"
               onClick={() => {
                 setZoom(1.0);
-                setPan({ x: 140, y: 50 });
+                setPan({ x: 120, y: 40 });
               }}
               className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors"
               title="Reset 100%"
@@ -2028,1156 +1161,140 @@ export default function ProjectStudioPage() {
             >
               <Maximize2 className="size-3.5" />
             </button>
-            {(selectedNodeId || selectedEdgeId) && (
-              <>
-                <div className="h-4 w-px bg-neutral-800" />
-                <button
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  className="flex size-7 items-center justify-center rounded-lg text-red-400 hover:bg-red-950/60 hover:text-red-300 transition-colors"
-                  title="Delete Selected (Del)"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </>
-            )}
           </div>
+
+          {/* Canvas Minimap (Bottom-Right) */}
+          <CanvasMinimap
+            graph={graph}
+            pan={pan}
+            zoom={zoom}
+            viewportSize={viewportSize}
+          />
+
+          {/* Actionable Validation Drawer */}
+          <ValidationPanel
+            validation={validation}
+            isOpen={isValidationOpen}
+            onClose={() => setIsValidationOpen(false)}
+            onSelectIssue={(issue: ValidationIssue) => {
+              if (issue.nodeId) {
+                setSelectedNodeId(issue.nodeId);
+                const targetNode = graph.nodes.find((n) => n.id === issue.nodeId);
+                if (targetNode && canvasRef.current) {
+                  const rect = canvasRef.current.getBoundingClientRect();
+                  setPan({
+                    x: Math.round(rect.width / 2 - (targetNode.position.x + NODE_WIDTH / 2) * zoom),
+                    y: Math.round(rect.height / 2 - (targetNode.position.y + NODE_HEIGHT / 2) * zoom),
+                  });
+                }
+              } else if (issue.edgeId) {
+                setSelectedEdgeId(issue.edgeId);
+              }
+            }}
+          />
         </div>
 
-        {/* ── Node Properties Inspector Drawer ────────────────────────── */}
-        {selectedNode && isInspectorOpen && (
-          <aside className="w-80 shrink-0 border-l border-neutral-800 bg-neutral-950 p-4 text-xs overflow-y-auto flex flex-col z-20">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
-              <div className="flex items-center gap-2">
-                <Sliders className="size-4 text-brand-400" />
-                <span className="font-semibold text-white">Node Inspector</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  title="Duplicate Node (Ctrl+D)"
-                  onClick={() => handleDuplicateNode(selectedNode.id)}
-                  className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-white"
-                >
-                  <Copy className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  title="Delete Node (Del)"
-                  onClick={() => handleDeleteNode(selectedNode.id)}
-                  className="rounded p-1 text-neutral-400 hover:bg-red-950/50 hover:text-red-400"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedNodeId(null)}
-                  className="rounded p-1 text-neutral-400 hover:text-white"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* General Properties */}
-            <div className="mt-4 space-y-3.5">
-              <InputField
-                label="Node Title"
-                value={selectedNode.title}
-                onChange={(val) => {
-                  setGraph((prev) => ({
-                    ...prev,
-                    nodes: prev.nodes.map((n) =>
-                      n.id === selectedNode.id ? { ...n, title: val, data: { ...n.data, label: val } } : n,
-                    ),
-                  }));
-                }}
-              />
-
-              <InputField
-                label="Sublabel / Category Tag"
-                value={selectedNode.data.sublabel || ''}
-                onChange={(val) => {
-                  setGraph((prev) => ({
-                    ...prev,
-                    nodes: prev.nodes.map((n) =>
-                      n.id === selectedNode.id ? { ...n, data: { ...n.data, sublabel: val } } : n,
-                    ),
-                  }));
-                }}
-              />
-
-              <InputField
-                label="Output State Variable"
-                value={selectedNode.data.outputVar || ''}
-                fontMono
-                placeholder="e.g. tech_solution"
-                onChange={(val) => {
-                  setGraph((prev) => ({
-                    ...prev,
-                    nodes: prev.nodes.map((n) =>
-                      n.id === selectedNode.id ? { ...n, data: { ...n.data, outputVar: val } } : n,
-                    ),
-                  }));
-                }}
-              />
-
-              <div className="h-px bg-neutral-800/80 my-2" />
-
-              {/* Start Trigger Node */}
-              {selectedNode.type === 'start' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-[11px] font-semibold text-neutral-300">
-                    <span>Input Parameters</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newParam: InputParameter = {
-                          name: `param_${Date.now().toString().slice(-4)}`,
-                          type: 'string',
-                          required: true,
-                        };
-                        setGraph((prev) => ({
-                          ...prev,
-                          nodes: prev.nodes.map((n) =>
-                            n.id === selectedNode.id
-                              ? {
-                                  ...n,
-                                  data: {
-                                    ...n.data,
-                                    inputParams: [...(n.data.inputParams || []), newParam],
-                                  },
-                                }
-                              : n,
-                          ),
-                        }));
-                      }}
-                      className="text-brand-400 hover:text-brand-300 font-mono text-[10px]"
-                    >
-                      + Add Param
-                    </button>
-                  </div>
-
-                  {selectedNode.data.inputParams?.map((param, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-2.5 space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <input
-                          type="text"
-                          value={param.name}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setGraph((prev) => ({
-                              ...prev,
-                              nodes: prev.nodes.map((n) =>
-                                n.id === selectedNode.id
-                                  ? {
-                                      ...n,
-                                      data: {
-                                        ...n.data,
-                                        inputParams: n.data.inputParams?.map((p, i) =>
-                                          i === idx ? { ...p, name: val } : p,
-                                        ),
-                                      },
-                                    }
-                                  : n,
-                              ),
-                            }));
-                          }}
-                          className="font-mono text-xs text-white bg-transparent border-b border-neutral-700 focus:border-brand-400 focus:outline-none w-32"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setGraph((prev) => ({
-                              ...prev,
-                              nodes: prev.nodes.map((n) =>
-                                n.id === selectedNode.id
-                                  ? {
-                                      ...n,
-                                      data: {
-                                        ...n.data,
-                                        inputParams: n.data.inputParams?.filter((_, i) => i !== idx),
-                                      },
-                                    }
-                                  : n,
-                              ),
-                            }));
-                          }}
-                          className="text-neutral-500 hover:text-red-400 text-xs"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-neutral-400">
-                        <select
-                          value={param.type}
-                          onChange={(e) => {
-                            const val = e.target.value as any;
-                            setGraph((prev) => ({
-                              ...prev,
-                              nodes: prev.nodes.map((n) =>
-                                n.id === selectedNode.id
-                                  ? {
-                                      ...n,
-                                      data: {
-                                        ...n.data,
-                                        inputParams: n.data.inputParams?.map((p, i) =>
-                                          i === idx ? { ...p, type: val } : p,
-                                        ),
-                                      },
-                                    }
-                                  : n,
-                              ),
-                            }));
-                          }}
-                          className="rounded border border-neutral-800 bg-neutral-900 px-1.5 py-0.5 text-xs text-white"
-                        >
-                          <option value="string">string</option>
-                          <option value="number">number</option>
-                          <option value="boolean">boolean</option>
-                          <option value="json">json</option>
-                        </select>
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={param.required}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setGraph((prev) => ({
-                                ...prev,
-                                nodes: prev.nodes.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? {
-                                        ...n,
-                                        data: {
-                                          ...n.data,
-                                          inputParams: n.data.inputParams?.map((p, i) =>
-                                            i === idx ? { ...p, required: checked } : p,
-                                          ),
-                                        },
-                                      }
-                                    : n,
-                                ),
-                              }));
-                            }}
-                            className="accent-brand-500 rounded"
-                          />
-                          <span>Required</span>
-                        </label>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Agent Node */}
-              {selectedNode.type === 'agent' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="Model Selection"
-                    value={selectedNode.data.model || 'gpt-4o-mini'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, model: val } } : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'GPT-4o Mini (Default)', value: 'gpt-4o-mini' },
-                      { label: 'GPT-4o (High Intelligence)', value: 'gpt-4o' },
-                      { label: 'Claude 3.5 Sonnet (Advanced Reasoning)', value: 'claude-3-5-sonnet' },
-                      { label: 'Claude 3.5 Haiku (Fast)', value: 'claude-3-5-haiku' },
-                      { label: 'Gemini 1.5 Pro (Long Context)', value: 'gemini-1.5-pro' },
-                      { label: 'Llama 3.3 70B (Open Source)', value: 'llama-3.3-70b' },
-                    ]}
-                  />
-
-                  <SliderField
-                    label="Temperature"
-                    value={selectedNode.data.temperature ?? 0.3}
-                    min={0.0}
-                    max={1.0}
-                    step={0.05}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, temperature: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SliderField
-                    label="Max ReAct Iteration Steps"
-                    value={selectedNode.data.maxSteps ?? 5}
-                    min={1}
-                    max={20}
-                    step={1}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, maxSteps: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-neutral-400 mb-1.5">
-                      Attached Tools
-                    </label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {[
-                        { id: 'web_search', label: 'Web Search' },
-                        { id: 'knowledge_base', label: 'Knowledge Base' },
-                        { id: 'custom_api', label: 'Custom API' },
-                        { id: 'code_exec', label: 'Code Exec' },
-                      ].map((t) => {
-                        const hasTool = selectedNode.data.tools?.includes(t.id);
-                        return (
-                          <button
-                            key={t.id}
-                            type="button"
-                            onClick={() => {
-                              const current = selectedNode.data.tools || [];
-                              const updated = hasTool
-                                ? current.filter((x) => x !== t.id)
-                                : [...current, t.id];
-                              setGraph((prev) => ({
-                                ...prev,
-                                nodes: prev.nodes.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? { ...n, data: { ...n.data, tools: updated } }
-                                    : n,
-                                ),
-                              }));
-                            }}
-                            className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium text-left transition-colors ${
-                              hasTool
-                                ? 'border-brand-500 bg-brand-950/40 text-brand-300'
-                                : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white'
-                            }`}
-                          >
-                            {hasTool ? '✓ ' : '+ '}
-                            {t.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <SelectField
-                    label="Memory Type"
-                    value={selectedNode.data.memoryType || 'buffer'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, memoryType: val as any } } : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Window Buffer Memory', value: 'buffer' },
-                      { label: 'Conversation Summary Memory', value: 'summary' },
-                      { label: 'Vector Store Memory', value: 'vector' },
-                      { label: 'Stateless (None)', value: 'none' },
-                    ]}
-                  />
-
-                  <TextareaField
-                    label="Agent System Prompt"
-                    value={selectedNode.data.systemPrompt || ''}
-                    placeholder="Define the agent persona, role, and execution boundaries..."
-                    rows={4}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, systemPrompt: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* LLM Single-Pass Node */}
-              {selectedNode.type === 'llm' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="Model"
-                    value={selectedNode.data.model || 'gpt-4o-mini'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, model: val } } : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'GPT-4o Mini', value: 'gpt-4o-mini' },
-                      { label: 'GPT-4o', value: 'gpt-4o' },
-                      { label: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet' },
-                    ]}
-                  />
-
-                  <SelectField
-                    label="Response Format"
-                    value={selectedNode.data.responseFormat || 'text'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, responseFormat: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Plain Text', value: 'text' },
-                      { label: 'JSON Object Schema', value: 'json_object' },
-                    ]}
-                  />
-
-                  <TextareaField
-                    label="User Prompt Template"
-                    value={selectedNode.data.userPrompt || ''}
-                    placeholder="e.g. Summarize: {user_message}"
-                    rows={3}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, userPrompt: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Intent Classifier Node */}
-              {selectedNode.type === 'classifier' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="Classifier Mode"
-                    value={selectedNode.data.classifierMode || 'semantic'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, classifierMode: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Semantic Embeddings', value: 'semantic' },
-                      { label: 'Zero-shot LLM Prompt', value: 'llm' },
-                      { label: 'Regex Pattern Match', value: 'regex' },
-                    ]}
-                  />
-
-                  <InputField
-                    label="Input Variable to Classify"
-                    value={selectedNode.data.inputVar || 'user_message'}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, inputVar: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  {selectedNode.data.classifierMode === 'llm' && (
-                    <TextareaField
-                      label="LLM Classification Prompt / Instructions"
-                      value={selectedNode.data.classifierPrompt || ''}
-                      placeholder="Explain how the LLM should decide between the routes (e.g. 'Classify as Billing if the user asks about invoices or cards. Classify as Technical for bugs, 500 errors, or code')."
-                      rows={4}
-                      onChange={(val) => {
-                        setGraph((prev) => ({
-                          ...prev,
-                          nodes: prev.nodes.map((n) =>
-                            n.id === selectedNode.id
-                              ? { ...n, data: { ...n.data, classifierPrompt: val } }
-                              : n,
-                          ),
-                        }));
-                      }}
-                    />
-                  )}
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-semibold text-neutral-300">
-                      <span>Configured Routes</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newRoute: RouteOption = {
-                            id: `r-${Date.now().toString().slice(-4)}`,
-                            label: `New Route ${(selectedNode.data.routes?.length || 0) + 1}`,
-                          };
-                          setGraph((prev) => ({
-                            ...prev,
-                            nodes: prev.nodes.map((n) =>
-                              n.id === selectedNode.id
-                                ? {
-                                    ...n,
-                                    data: {
-                                      ...n.data,
-                                      routes: [...(n.data.routes || []), newRoute],
-                                    },
-                                  }
-                                : n,
-                            ),
-                          }));
-                        }}
-                        className="text-brand-400 hover:text-brand-300 font-mono text-[10px]"
-                      >
-                        + Add Route
-                      </button>
-                    </div>
-
-                    {selectedNode.data.routes?.map((route, rIdx) => (
-                      <div
-                        key={route.id}
-                        className="flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900/60 p-2"
-                      >
-                        <input
-                          type="text"
-                          value={route.label}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setGraph((prev) => ({
-                              ...prev,
-                              nodes: prev.nodes.map((n) =>
-                                n.id === selectedNode.id
-                                  ? {
-                                      ...n,
-                                      data: {
-                                        ...n.data,
-                                        routes: n.data.routes?.map((r, i) =>
-                                          i === rIdx ? { ...r, label: val } : r,
-                                        ),
-                                      },
-                                    }
-                                  : n,
-                              ),
-                            }));
-                          }}
-                          className="flex-1 bg-transparent text-xs text-white focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setGraph((prev) => ({
-                              ...prev,
-                              nodes: prev.nodes.map((n) =>
-                                n.id === selectedNode.id
-                                  ? {
-                                      ...n,
-                                      data: {
-                                        ...n.data,
-                                        routes: n.data.routes?.filter((_, i) => i !== rIdx),
-                                      },
-                                    }
-                                  : n,
-                              ),
-                            }));
-                          }}
-                          className="text-neutral-500 hover:text-red-400 text-xs px-1"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <InputField
-                    label="Fallback Route"
-                    value={selectedNode.data.fallbackRoute || 'General Inquiries'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, fallbackRoute: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Condition Rule Node */}
-              {selectedNode.type === 'condition' && (
-                <div className="space-y-3">
-                  <InputField
-                    label="Condition Expression (JavaScript / Python)"
-                    value={selectedNode.data.conditionExpr || 'confidence >= 0.80'}
-                    fontMono
-                    placeholder="e.g. score >= 0.8"
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, conditionExpr: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <InputField
-                    label="True Branch Label"
-                    value={selectedNode.data.trueBranchLabel || 'TRUE'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, trueBranchLabel: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <InputField
-                    label="False Branch Label"
-                    value={selectedNode.data.falseBranchLabel || 'FALSE'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, falseBranchLabel: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* RAG Knowledge Base Node */}
-              {selectedNode.type === 'rag' && (
-                <div className="space-y-3">
-                  <InputField
-                    label="Vector Collection Name"
-                    value={selectedNode.data.ragCollection || 'company_documentation'}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, ragCollection: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <InputField
-                    label="Query Template"
-                    value={selectedNode.data.queryTemplate || '{user_message}'}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, queryTemplate: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SliderField
-                    label="Top K Documents"
-                    value={selectedNode.data.topK ?? 3}
-                    min={1}
-                    max={10}
-                    step={1}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, topK: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SliderField
-                    label="Similarity Threshold"
-                    value={selectedNode.data.similarityThreshold ?? 0.75}
-                    min={0.5}
-                    max={1.0}
-                    step={0.05}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, similarityThreshold: val } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* External Tool Node */}
-              {selectedNode.type === 'tool' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="Tool Type"
-                    value={selectedNode.data.toolType || 'web_search'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, toolType: val as any } } : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Live Web Search (Tavily/Google)', value: 'web_search' },
-                      { label: 'Code Execution Sandbox (Python)', value: 'code_exec' },
-                      { label: 'Relational SQL Database', value: 'sql_database' },
-                      { label: 'Knowledge Base Vector Search', value: 'knowledge_base' },
-                      { label: 'Custom HTTP API Client', value: 'custom_api' },
-                    ]}
-                  />
-
-                  <TextareaField
-                    label="Tool Description"
-                    value={selectedNode.data.description || ''}
-                    placeholder="Instructions for the agent on how and when to invoke this tool..."
-                    rows={3}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, description: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* API Request Node */}
-              {selectedNode.type === 'api_request' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="HTTP Method"
-                    value={selectedNode.data.apiMethod || 'POST'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, apiMethod: val as any } } : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'GET', value: 'GET' },
-                      { label: 'POST', value: 'POST' },
-                      { label: 'PUT', value: 'PUT' },
-                      { label: 'DELETE', value: 'DELETE' },
-                    ]}
-                  />
-
-                  <InputField
-                    label="Endpoint URL"
-                    value={selectedNode.data.apiUrl || ''}
-                    fontMono
-                    placeholder="https://api.example.com/webhook"
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, apiUrl: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <TextareaField
-                    label="Headers (JSON)"
-                    value={selectedNode.data.apiHeaders || ''}
-                    rows={2}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, apiHeaders: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <TextareaField
-                    label="Request Body (JSON)"
-                    value={selectedNode.data.apiBody || ''}
-                    rows={3}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, apiBody: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Guardrail Node */}
-              {selectedNode.type === 'guardrail' && (
-                <div className="space-y-3">
-                  <label className="block text-[11px] font-medium text-neutral-400 mb-1">
-                    Enforced Moderation Rules
-                  </label>
-                  <div className="space-y-1.5">
-                    {[
-                      { id: 'injection', label: 'Prompt Injection Defense' },
-                      { id: 'pii', label: 'PII Redaction (Email, SSN, Credit Cards)' },
-                      { id: 'toxic', label: 'Toxic & Harmful Language Filter' },
-                      { id: 'hallucination', label: 'Hallucination & Faithfulness Check' },
-                    ].map((r) => {
-                      const enabled = selectedNode.data.guardrailRules?.includes(r.id);
-                      return (
-                        <label
-                          key={r.id}
-                          className="flex items-center gap-2 p-2 rounded-lg border border-neutral-800 bg-neutral-900 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={enabled}
-                            onChange={(e) => {
-                              const current = selectedNode.data.guardrailRules || [];
-                              const updated = e.target.checked
-                                ? [...current, r.id]
-                                : current.filter((x) => x !== r.id);
-                              setGraph((prev) => ({
-                                ...prev,
-                                nodes: prev.nodes.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? { ...n, data: { ...n.data, guardrailRules: updated } }
-                                    : n,
-                                ),
-                              }));
-                            }}
-                            className="accent-brand-500 rounded"
-                          />
-                          <span className="text-xs text-neutral-200">{r.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  <SelectField
-                    label="Action on Violation"
-                    value={selectedNode.data.moderationAction || 'block'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, moderationAction: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Block & Return Error', value: 'block' },
-                      { label: 'Redact & Continue', value: 'redact' },
-                      { label: 'Warn & Log Violation', value: 'warn' },
-                    ]}
-                  />
-                </div>
-              )}
-
-              {/* Memory Store Node */}
-              {selectedNode.type === 'memory' && (
-                <div className="space-y-3">
-                  <SelectField
-                    label="State Action"
-                    value={selectedNode.data.stateAction || 'read'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, stateAction: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Read from State Store', value: 'read' },
-                      { label: 'Write / Update State Store', value: 'write' },
-                      { label: 'Clear State Key', value: 'clear' },
-                    ]}
-                  />
-
-                  <InputField
-                    label="State Key Name"
-                    value={selectedNode.data.stateKey || 'session_state'}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, stateKey: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Code Transform Node */}
-              {selectedNode.type === 'transform' && (
-                <div className="space-y-3">
-                  <TextareaField
-                    label="JavaScript Transform Function"
-                    value={selectedNode.data.transformCode || 'return { output: input.text.trim() };'}
-                    rows={6}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, transformCode: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Human Approval Node */}
-              {selectedNode.type === 'human' && (
-                <div className="space-y-3">
-                  <TextareaField
-                    label="Approval Instructions"
-                    value={selectedNode.data.approvalPrompt || ''}
-                    placeholder="Instructions for the human reviewer..."
-                    rows={3}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, approvalPrompt: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SliderField
-                    label="Review Timeout (Minutes)"
-                    value={selectedNode.data.timeoutMinutes ?? 60}
-                    min={5}
-                    max={240}
-                    step={5}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id ? { ...n, data: { ...n.data, timeoutMinutes: val } } : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SelectField
-                    label="Action upon Timeout"
-                    value={selectedNode.data.timeoutAction || 'escalate'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, timeoutAction: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Escalate to Tier-2', value: 'escalate' },
-                      { label: 'Auto-Approve', value: 'auto_approve' },
-                      { label: 'Auto-Reject', value: 'auto_reject' },
-                    ]}
-                  />
-                </div>
-              )}
-
-              {/* End Output Node */}
-              {selectedNode.type === 'end' && (
-                <div className="space-y-3">
-                  <TextareaField
-                    label="Response Template"
-                    value={selectedNode.data.endResponseTemplate || '{{agent_output}}'}
-                    rows={2}
-                    fontMono
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, endResponseTemplate: val } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                  />
-
-                  <SelectField
-                    label="Delivery Channel"
-                    value={selectedNode.data.endDeliveryType || 'chat_message'}
-                    onChange={(val) => {
-                      setGraph((prev) => ({
-                        ...prev,
-                        nodes: prev.nodes.map((n) =>
-                          n.id === selectedNode.id
-                            ? { ...n, data: { ...n.data, endDeliveryType: val as any } }
-                            : n,
-                        ),
-                      }));
-                    }}
-                    options={[
-                      { label: 'Streaming Chat Message', value: 'chat_message' },
-                      { label: 'Webhook HTTP Callback', value: 'webhook_callback' },
-                      { label: 'Human Agent Escalation Queue', value: 'human_escalation' },
-                    ]}
-                  />
-                </div>
-              )}
-
-              {/* Delete Node Action */}
-              <button
-                type="button"
-                onClick={() => handleDeleteNode(selectedNode.id)}
-                className="mt-6 w-full rounded-lg border border-red-500/30 bg-red-950/20 py-2 text-xs font-medium text-red-400 transition-colors hover:bg-red-950/40"
-              >
-                Delete Node
-              </button>
-            </div>
-          </aside>
+        {/* ── Contextual Schema-Driven Properties Panel ────────────────── */}
+        {selectedNode && isInspectorOpen && !isTestPanelOpen && !isCopilotOpen && (
+          <PropertiesPanel
+            node={selectedNode}
+            graph={graph}
+            onUpdateNode={handleUpdateNode}
+            onDeleteNode={handleDeleteNode}
+            onClose={() => setSelectedNodeId(null)}
+          />
         )}
 
-        {/* ── AI Copilot Drawer (ChatGPT-Style Window) ────────────────── */}
-        {isCopilotOpen && (
-          <aside className="flex w-96 shrink-0 flex-col border-l border-neutral-800 bg-neutral-950 text-xs z-20">
-            {/* Header */}
-            <div className="flex h-12 items-center justify-between border-b border-neutral-800 px-4">
-              <div className="flex items-center gap-2">
-                <div className="flex size-5 items-center justify-center rounded bg-brand-500 text-white">
-                  <Sparkles className="size-3" />
-                </div>
-                <span className="font-semibold text-white">LangGraph Copilot</span>
-              </div>
+        {/* ── Workflow Test Panel ───────────────────────────────────────── */}
+        <TestPanel
+          graph={graph}
+          isOpen={isTestPanelOpen}
+          onClose={() => setIsTestPanelOpen(false)}
+          onNodeHighlight={(id) => setHighlightedNodeId(id)}
+        />
 
+        {/* ── AI Copilot Drawer ────────────────────────────────────────── */}
+        {isCopilotOpen && (
+          <aside className="w-96 shrink-0 border-l border-neutral-800 bg-neutral-950 flex flex-col z-20 text-xs">
+            <div className="flex h-13 items-center justify-between border-b border-neutral-800 px-4">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setMessages([
-                      {
-                        id: 'init-new',
-                        role: 'assistant',
-                        content:
-                          'New conversation started. Describe your agent architecture (e.g. "Create a RAG pipeline with safety filters").',
-                        timestamp: new Date(),
-                      },
-                    ])
-                  }
-                  className="rounded px-2 py-1 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-white"
-                >
-                  + New Chat
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCopilotOpen(false)}
-                  className="text-neutral-400 hover:text-white"
-                >
-                  <X className="size-4" />
-                </button>
+                <div className="flex size-6 items-center justify-center rounded-md bg-brand-500 text-white">
+                  <Sparkles className="size-3.5" />
+                </div>
+                <span className="font-semibold text-white">AI Workflow Architect</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setIsCopilotOpen(false)}
+                className="text-neutral-400 hover:text-white"
+              >
+                ✕
+              </button>
             </div>
 
-            {/* Suggested Blueprints */}
-            <div className="border-b border-neutral-800/80 bg-neutral-900/50 p-2.5">
+            {/* Quick Template Chips */}
+            <div className="border-b border-neutral-800/80 bg-neutral-900/40 p-2.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                Suggested Blueprints
+                Architectural Blueprints
               </span>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleApplyGraph(TEMPLATES.intent_router.graph)}
-                  className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-700 hover:text-white transition-colors"
-                >
-                  Multi-Agent Router
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleApplyGraph(TEMPLATES.rag_researcher.graph)}
-                  className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-700 hover:text-white transition-colors"
-                >
-                  RAG Synthesis Flow
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleApplyGraph(TEMPLATES.safety_guardrail.graph)}
-                  className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-700 hover:text-white transition-colors"
-                >
-                  Safety Guardrailed
-                </button>
+                {[
+                  'Customer support triage with refund routing',
+                  'RAG research agent with live web search',
+                  'E-commerce order status and fulfillment',
+                ].map((blueprint) => (
+                  <button
+                    key={blueprint}
+                    type="button"
+                    onClick={() => {
+                      const res = generateWorkflowFromPrompt(blueprint);
+                      updateGraphWithHistory(() => deserializeFromCanonical(res.workflow));
+                      setTimeout(() => handleFitView(), 50);
+                    }}
+                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-brand-500 hover:text-white transition-colors"
+                  >
+                    {blueprint}
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Chat Thread */}
-            <div className="flex-1 space-y-3.5 overflow-y-auto p-4">
-              {messages.map((msg) => (
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {copilotMessages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 leading-relaxed ${
+                    className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 leading-relaxed ${
                       msg.role === 'user'
-                        ? 'bg-brand-600 text-white shadow-xs'
-                        : 'border border-neutral-800 bg-neutral-900 text-neutral-200 shadow-xs'
+                        ? 'bg-brand-600 text-white'
+                        : 'border border-neutral-800 bg-neutral-900 text-neutral-200'
                     }`}
                   >
                     <p>{msg.content}</p>
 
-                    {/* Apply Graph Action */}
+                    {msg.highlights && (
+                      <ul className="mt-2 space-y-1 list-disc list-inside text-[11px] text-neutral-300">
+                        {msg.highlights.map((h, i) => (
+                          <li key={i}>{h}</li>
+                        ))}
+                      </ul>
+                    )}
+
                     {msg.suggestedGraph && (
                       <div className="mt-3 pt-2 border-t border-neutral-800">
                         <button
                           type="button"
-                          onClick={() => handleApplyGraph(msg.suggestedGraph!)}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 font-semibold text-neutral-950 hover:bg-neutral-200 transition-colors shadow-xs"
+                          onClick={() => {
+                            updateGraphWithHistory(() => msg.suggestedGraph!);
+                            setTimeout(() => handleFitView(), 50);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1 font-semibold text-neutral-950 hover:bg-neutral-200 transition-colors shadow-xs"
                         >
                           <Play className="size-3 fill-neutral-950" />
-                          Apply to Canvas
+                          Apply Generated Graph to Canvas
                         </button>
                       </div>
                     )}
@@ -3185,204 +1302,77 @@ export default function ProjectStudioPage() {
                 </div>
               ))}
 
-              {isAiGenerating && (
+              {isCopilotGenerating && (
                 <div className="flex items-center gap-2 text-neutral-400">
                   <Loader2 className="size-3.5 animate-spin text-brand-400" />
-                  Generating LangGraph architecture…
+                  Generating workflow architecture...
                 </div>
               )}
             </div>
 
-            {/* Input Bar */}
-            <div className="border-t border-neutral-800 p-3">
-              <div className="relative">
+            {/* Input Form */}
+            <div className="p-3 border-t border-neutral-800">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendCopilotPrompt();
+                }}
+                className="relative"
+              >
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="Describe your LangGraph agent flow..."
-                  className="w-full rounded-xl border border-neutral-800 bg-neutral-900 py-2.5 pl-3.5 pr-10 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none"
+                  placeholder="Describe your agent workflow..."
+                  className="w-full rounded-xl border border-neutral-800 bg-neutral-900 py-2 pl-3 pr-10 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none"
                 />
                 <button
-                  type="button"
-                  onClick={handleSendMessage}
-                  disabled={!chatInput.trim() || isAiGenerating}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 size-7 rounded-lg bg-brand-600 flex items-center justify-center text-white hover:bg-brand-500 disabled:opacity-40 transition-colors"
+                  type="submit"
+                  disabled={!chatInput.trim() || isCopilotGenerating}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex size-7 items-center justify-center rounded-lg bg-brand-600 text-white disabled:opacity-30"
                 >
-                  <Send className="size-3" />
+                  <Send className="size-3.5" />
                 </button>
-              </div>
+              </form>
             </div>
           </aside>
         )}
       </div>
 
-      {/* ── JSON Graph Viewer & Importer Modal ───────────────────────── */}
-      {isJsonModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-neutral-800 bg-neutral-950 p-6 shadow-2xl">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
-              <div className="flex items-center gap-2">
-                <Code2 className="size-4 text-brand-400" />
-                <h3 className="text-sm font-bold text-white">LangGraph JSON Specification</h3>
-              </div>
+      {/* ── Publishing Modal ───────────────────────────────────────────── */}
+      <PublishModal
+        graph={graph}
+        validation={validation}
+        publishedVersions={publishedVersions}
+        isOpen={isPublishModalOpen}
+        onClose={() => setIsPublishModalOpen(false)}
+        onPublishVersion={(newVer) => {
+          const updated = [newVer, ...publishedVersions.map((v) => ({ ...v, isCurrentLive: false }))];
+          setPublishedVersions(updated);
+          localStorage.setItem(`quickgent_versions_${projectId}`, JSON.stringify(updated));
+        }}
+        onRollbackVersion={(v) => {
+          setGraph(deserializeFromCanonical(v.workflowSnapshot));
+          const updated = publishedVersions.map((item) => ({
+            ...item,
+            isCurrentLive: item.version === v.version,
+          }));
+          setPublishedVersions(updated);
+          localStorage.setItem(`quickgent_versions_${projectId}`, JSON.stringify(updated));
+          setIsPublishModalOpen(false);
+        }}
+      />
 
-              {/* Tabs */}
-              <div className="flex items-center rounded-lg border border-neutral-800 bg-neutral-900 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setJsonModalTab('langgraph')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    jsonModalTab === 'langgraph'
-                      ? 'bg-brand-600 text-white'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  LangGraph v1
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setJsonModalTab('studio')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    jsonModalTab === 'studio'
-                      ? 'bg-brand-600 text-white'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  Studio State
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setJsonModalTab('import')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    jsonModalTab === 'import'
-                      ? 'bg-brand-600 text-white'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  Import JSON
-                </button>
-              </div>
-
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => setIsJsonModalOpen(false)}
-                className="text-neutral-400 hover:text-white"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            {/* Tab 1: LangGraph v1 Canonical Execution Spec */}
-            {jsonModalTab === 'langgraph' && (
-              <div className="flex flex-1 flex-col overflow-hidden pt-3">
-                <div className="flex items-center justify-between text-xs text-neutral-400 pb-2">
-                  <span>Canonical structured format for LangGraph Python / TypeScript execution engine</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(JSON.stringify(compiledLangGraph, null, 2));
-                        setIsCopied(true);
-                        setTimeout(() => setIsCopied(false), 2000);
-                      }}
-                      className="inline-flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-300 hover:border-neutral-700 hover:text-white"
-                    >
-                      {isCopied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
-                      {isCopied ? 'Copied!' : 'Copy JSON'}
-                    </button>
-                  </div>
-                </div>
-                <pre className="flex-1 overflow-auto rounded-xl border border-neutral-900 bg-black/80 p-4 font-mono text-[11px] leading-relaxed text-emerald-400">
-                  {JSON.stringify(compiledLangGraph, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {/* Tab 2: Raw Studio Layout Graph */}
-            {jsonModalTab === 'studio' && (
-              <div className="flex flex-1 flex-col overflow-hidden pt-3">
-                <div className="flex items-center justify-between text-xs text-neutral-400 pb-2">
-                  <span>Visual canvas state with node coordinates and layout positions</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(graph, null, 2));
-                      setIsCopied(true);
-                      setTimeout(() => setIsCopied(false), 2000);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs font-medium text-neutral-300 hover:border-neutral-700 hover:text-white"
-                  >
-                    {isCopied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
-                    {isCopied ? 'Copied!' : 'Copy JSON'}
-                  </button>
-                </div>
-                <pre className="flex-1 overflow-auto rounded-xl border border-neutral-900 bg-black/80 p-4 font-mono text-[11px] leading-relaxed text-sky-400">
-                  {JSON.stringify(graph, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {/* Tab 3: Import JSON to Canvas */}
-            {jsonModalTab === 'import' && (
-              <div className="flex flex-1 flex-col overflow-hidden pt-3 space-y-3">
-                <p className="text-xs text-neutral-400">
-                  Paste either a compiled LangGraph JSON specification or a Studio graph state. The editor will
-                  automatically parse nodes, edges, routes, and auto-layout the flow onto the canvas.
-                </p>
-
-                {importError && (
-                  <div className="rounded-lg border border-red-500/40 bg-red-950/40 p-2.5 text-xs text-red-300">
-                    {importError}
-                  </div>
-                )}
-
-                <textarea
-                  value={importText}
-                  onChange={(e) => {
-                    setImportText(e.target.value);
-                    setImportError(null);
-                  }}
-                  placeholder="Paste JSON content here..."
-                  className="flex-1 w-full rounded-xl border border-neutral-800 bg-black/80 p-3 font-mono text-xs text-white focus:border-brand-500 focus:outline-none resize-none"
-                  rows={10}
-                />
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsJsonModalOpen(false)}
-                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-400 hover:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!importText.trim()}
-                    onClick={() => {
-                      try {
-                        const imported = importWorkflowJSON(importText.trim());
-                        setGraph(imported);
-                        setIsJsonModalOpen(false);
-                        setImportText('');
-                        setTimeout(() => handleFitView(), 50);
-                      } catch (err: any) {
-                        setImportError(err.message || 'Invalid JSON syntax.');
-                      }
-                    }}
-                    className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 disabled:opacity-40"
-                  >
-                    Import & Render Flow
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── Canonical JSON Modal ───────────────────────────────────────── */}
+      <JsonModal
+        graph={graph}
+        isOpen={isJsonModalOpen}
+        onClose={() => setIsJsonModalOpen(false)}
+        onImportGraph={(imported) => {
+          updateGraphWithHistory(() => imported);
+          setTimeout(() => handleFitView(), 50);
+        }}
+      />
     </div>
   );
 }
