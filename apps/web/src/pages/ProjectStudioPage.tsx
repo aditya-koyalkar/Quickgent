@@ -27,19 +27,28 @@ import {
   Rocket,
   Undo2,
   Redo2,
+  ChevronDown,
+  X,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
+import {
+  useWorkflows,
+  useCreateWorkflow,
+  useUpdateWorkflow,
+  useMakeLiveWorkflow,
+} from '../hooks/useWorkflows';
+import type { WorkflowItem } from '../lib/api';
 import type {
   WorkflowNode,
   WorkflowEdge,
   WorkflowGraph,
   CoreNodeType,
-  PublishedVersion,
   ValidationIssue,
 } from '../types/workflow';
 import { NODE_REGISTRY } from '../lib/workflow/registry';
 import {
   deserializeFromCanonical,
+  serializeToCanonical,
   createDefaultCanonicalWorkflow,
 } from '../lib/workflow/canonical';
 import { validateWorkflow } from '../lib/workflow/validation';
@@ -60,6 +69,28 @@ export default function ProjectStudioPage() {
   const { id: projectId = '' } = useParams<{ id: string }>();
   const { data: project } = useProject(projectId);
   const updateProjectMutation = useUpdateProject();
+
+  // Workflows Query & Mutations
+  const workflowsQuery = useWorkflows(projectId);
+  const workflows = useMemo(() => workflowsQuery.data || [], [workflowsQuery.data]);
+  const createWorkflowMutation = useCreateWorkflow();
+  const updateWorkflowMutation = useUpdateWorkflow();
+  const makeLiveMutation = useMakeLiveWorkflow();
+
+  // Active Version & Notifications
+  const [currentVersion, setCurrentVersion] = useState<string>('1.0.0');
+  const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
+  const initialLoadedRef = useRef(false);
+
+  const currentWf = useMemo(
+    () => workflows.find((w) => w.version === currentVersion) || workflows[0],
+    [workflows, currentVersion],
+  );
 
   // Workflow State & Undo/Redo History
   const [graph, setGraph] = useState<WorkflowGraph>(() =>
@@ -98,9 +129,6 @@ export default function ProjectStudioPage() {
   const [projectName, setProjectName] = useState('Customer Support Agent');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-  // Publishing Versions Storage
-  const [publishedVersions, setPublishedVersions] = useState<PublishedVersion[]>([]);
 
   // AI Copilot Chat State
   const [chatInput, setChatInput] = useState('');
@@ -172,11 +200,43 @@ export default function ProjectStudioPage() {
     setGraph(next);
   }, [future, graph]);
 
-  // Load from LocalStorage or Backend
+  // Sync Project Name when project loads
   useEffect(() => {
     if (project?.name) {
       setProjectName(project.name);
     }
+  }, [project?.name]);
+
+  // Load Initial Workflow from Backend or LocalStorage (run once on mount/data ready)
+  useEffect(() => {
+    if (initialLoadedRef.current) return;
+    if (!projectId) return;
+    if (workflowsQuery.isLoading) return;
+
+    initialLoadedRef.current = true;
+
+    if (workflows.length > 0) {
+      // Prefer LIVE workflow, otherwise latest created workflow
+      const live = workflows.find((w) => w.isLive);
+      const target = live || workflows[0];
+      if (target) {
+        setCurrentVersion(target.version);
+        if (target.graph) {
+          try {
+            if (target.graph.schemaVersion === '1.0.0') {
+              setGraph(deserializeFromCanonical(target.graph));
+              return;
+            } else if (target.graph.nodes && target.graph.edges) {
+              setGraph(target.graph);
+              return;
+            }
+          } catch (err) {
+            console.error('Failed to parse workflow graph', err);
+          }
+        }
+      }
+    }
+
     if (project?.workflows?.[0]?.graph) {
       try {
         const loaded = project.workflows[0].graph as any;
@@ -201,14 +261,10 @@ export default function ProjectStudioPage() {
           setGraph(parsed);
         }
       }
-      const savedVersions = localStorage.getItem(`quickgent_versions_${projectId}`);
-      if (savedVersions) {
-        setPublishedVersions(JSON.parse(savedVersions));
-      }
     } catch {
       // ignore
     }
-  }, [project, projectId]);
+  }, [workflowsQuery.isLoading, workflows, project?.workflows, projectId]);
 
   // Autosave Draft to LocalStorage with debounce
   useEffect(() => {
@@ -382,26 +438,159 @@ export default function ProjectStudioPage() {
     }));
   };
 
-  // Save Workflow
-  const handleSaveWorkflow = () => {
-    setSaveStatus('saving');
+  // Select and switch to a workflow version
+  const handleSelectVersion = (wf: WorkflowItem) => {
+    setCurrentVersion(wf.version);
+    setIsVersionDropdownOpen(false);
+    if (wf.graph) {
+      try {
+        if (wf.graph.schemaVersion === '1.0.0') {
+          setGraph(deserializeFromCanonical(wf.graph));
+        } else if (wf.graph.nodes && wf.graph.edges) {
+          setGraph(wf.graph);
+        }
+        setHistory([]);
+        setFuture([]);
+        setNotification({
+          message: `Switched canvas to v${wf.version} (${wf.isLive ? 'LIVE' : 'DRAFT'})`,
+          type: 'info',
+        });
+        setTimeout(() => setNotification(null), 3000);
+      } catch (err) {
+        console.error('Failed to load version graph', err);
+      }
+    }
+  };
+
+  // Promote a version to LIVE
+  const handleMakeLive = async (ver: string) => {
     try {
-      localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
-    } catch {
-      // ignore
+      await makeLiveMutation.mutateAsync({ projectId, version: ver });
+      setNotification({
+        message: `Version v${ver} is now LIVE in production!`,
+        type: 'success',
+      });
+      setTimeout(() => setNotification(null), 4000);
+    } catch (err: any) {
+      setNotification({
+        message: err.message || `Failed to make v${ver} LIVE`,
+        type: 'error',
+      });
+      setTimeout(() => setNotification(null), 4000);
+    }
+  };
+
+  // Publish a new release version
+  const handlePublishNewVersion = async (data: {
+    version: string;
+    note: string;
+    makeLiveImmediately: boolean;
+  }) => {
+    if (!validation.isValid) {
+      throw new Error(
+        `Cannot publish workflow version: graph has ${validation.summary.errors} validation error(s). All workflow JSON saved to the database must be valid.`,
+      );
     }
 
-    if (projectName.trim() && projectName !== project?.name) {
-      updateProjectMutation.mutate({
-        id: projectId,
-        data: { name: projectName.trim() },
+    const canonical = serializeToCanonical(graph);
+
+    await createWorkflowMutation.mutateAsync({
+      projectId,
+      data: {
+        version: data.version,
+        json: canonical,
+        note: data.note,
+      },
+    });
+
+    if (data.makeLiveImmediately) {
+      await makeLiveMutation.mutateAsync({
+        projectId,
+        version: data.version,
       });
     }
 
-    setTimeout(() => {
+    setCurrentVersion(data.version);
+    setNotification({
+      message: `v${data.version} saved successfully${data.makeLiveImmediately ? ' and is now LIVE!' : '!'}`,
+      type: 'success',
+    });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Save current workflow version
+  const handleSaveWorkflow = async () => {
+    if (!validation.isValid) {
+      setSaveStatus('error');
+      setIsValidationOpen(true);
+      const firstError = validation.issues.find((i) => i.severity === 'error')?.message;
+      setNotification({
+        message: `Cannot save: ${firstError || `${validation.summary.errors} error(s) found`}. Check the Validation panel for details.`,
+        type: 'error',
+      });
+      setTimeout(() => setSaveStatus('idle'), 5000);
+      return;
+    }
+
+    setSaveStatus('saving');
+    try {
+      const canonical = serializeToCanonical(graph);
+      try {
+        localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
+      } catch {
+        // ignore
+      }
+
+      if (projectName.trim() && projectName !== project?.name) {
+        updateProjectMutation.mutate({
+          id: projectId,
+          data: { name: projectName.trim() },
+        });
+      }
+
+      const existingWf = workflows.find((w) => w.version === currentVersion);
+      if (existingWf) {
+        if (existingWf.isLive) {
+          // LIVE is immutable - prompt user to publish as new version
+          setSaveStatus('idle');
+          setIsPublishModalOpen(true);
+          setNotification({
+            message: `Version v${currentVersion} is LIVE and immutable. Publish as a new version to save changes.`,
+            type: 'info',
+          });
+          setTimeout(() => setNotification(null), 5000);
+          return;
+        }
+
+        await updateWorkflowMutation.mutateAsync({
+          projectId,
+          version: currentVersion,
+          data: {
+            json: canonical,
+          },
+        });
+      } else {
+        // Create initial version
+        await createWorkflowMutation.mutateAsync({
+          projectId,
+          data: {
+            version: currentVersion || '1.0.0',
+            json: canonical,
+            note: 'Initial version',
+          },
+        });
+      }
+
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2500);
-    }, 400);
+    } catch (err: any) {
+      setSaveStatus('error');
+      setNotification({
+        message: err.message || 'Failed to save workflow',
+        type: 'error',
+      });
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
   };
 
   // Keyboard Shortcuts
@@ -621,15 +810,139 @@ export default function ProjectStudioPage() {
             </button>
           )}
 
-          <span
-            className={`rounded-md border px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
-              publishedVersions.length > 0
-                ? 'border-emerald-800/40 bg-emerald-950/50 text-emerald-300'
-                : 'border-neutral-800 bg-neutral-900 text-neutral-400'
-            }`}
-          >
-            {publishedVersions.length > 0 ? `LIVE v${publishedVersions[0].version}` : 'DRAFT'}
-          </span>
+          {/* Version Selector Dropdown & Status */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsVersionDropdownOpen((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-all cursor-pointer ${
+                workflows.find((w) => w.version === currentVersion)?.isLive
+                  ? 'border-emerald-700/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-950/70'
+                  : 'border-neutral-800 bg-neutral-900 text-neutral-300 hover:bg-neutral-800'
+              }`}
+              title="Click to switch or manage workflow versions"
+            >
+              <span
+                className={`size-2 rounded-full ${
+                  workflows.find((w) => w.version === currentVersion)?.isLive
+                    ? 'bg-emerald-400 animate-pulse'
+                    : 'bg-neutral-500'
+                }`}
+              />
+              <span className="font-semibold">v{currentVersion}</span>
+              <span className="text-[10px] uppercase font-bold opacity-80">
+                [{workflows.find((w) => w.version === currentVersion)?.isLive ? 'LIVE' : (workflows.length > 0 ? 'DRAFT' : 'NEW')}]
+              </span>
+              <ChevronDown className="size-3 text-neutral-400" />
+            </button>
+
+            {/* Dropdown Menu */}
+            {isVersionDropdownOpen && (
+              <div
+                className="absolute left-0 top-full mt-2 w-72 rounded-xl border border-neutral-800 bg-neutral-950 p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-2.5 py-1.5 text-[10px] font-semibold text-neutral-400 border-b border-neutral-900">
+                  <span>PROJECT VERSIONS ({workflows.length})</span>
+                  {workflows.find((w) => w.isLive) && (
+                    <span className="text-emerald-400 font-mono">
+                      Live: v{workflows.find((w) => w.isLive)?.version}
+                    </span>
+                  )}
+                </div>
+
+                <div className="max-h-56 overflow-y-auto py-1 space-y-1">
+                  {workflows.length === 0 ? (
+                    <div className="p-3 text-center text-neutral-500 text-xs">
+                      No versions yet. Click Save or Publish to create v1.0.0.
+                    </div>
+                  ) : (
+                    workflows.map((wf) => {
+                      const isSelected = wf.version === currentVersion;
+                      const isLive = wf.isLive;
+
+                      return (
+                        <div
+                          key={wf.version}
+                          className={`flex items-center justify-between rounded-lg p-2 text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-brand-950/40 border border-brand-800/40 text-white'
+                              : 'hover:bg-neutral-900 text-neutral-300'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSelectVersion(wf)}
+                            className="flex flex-col text-left flex-1"
+                          >
+                            <div className="flex items-center gap-1.5 font-mono font-semibold">
+                              <span>v{wf.version}</span>
+                              <span
+                                className={`rounded px-1 text-[8px] uppercase font-bold border ${
+                                  isLive
+                                    ? 'bg-emerald-950 border-emerald-800/60 text-emerald-400'
+                                    : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                                }`}
+                              >
+                                {isLive ? 'LIVE' : 'DRAFT'}
+                              </span>
+                            </div>
+                            {wf.note && (
+                              <span className="text-[10px] text-neutral-400 truncate max-w-[170px] mt-0.5">
+                                {wf.note}
+                              </span>
+                            )}
+                          </button>
+
+                          {!isLive && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleMakeLive(wf.version);
+                                setIsVersionDropdownOpen(false);
+                              }}
+                              className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-1.5 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-900 transition-colors"
+                              title="Make this version LIVE"
+                            >
+                              <Rocket className="size-2.5" />
+                              Make Live
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="pt-1.5 border-t border-neutral-900 flex justify-between items-center px-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsVersionDropdownOpen(false);
+                      setIsPublishModalOpen(true);
+                    }}
+                    className="w-full text-center rounded-lg bg-brand-600/10 border border-brand-500/30 py-1.5 text-[11px] font-semibold text-brand-400 hover:bg-brand-600/20 transition-colors cursor-pointer"
+                  >
+                    + Publish as New Version
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Make Live Button for Current Version (if not live) */}
+          {workflows.find((w) => w.version === currentVersion) &&
+            !workflows.find((w) => w.version === currentVersion)?.isLive && (
+              <button
+                type="button"
+                onClick={() => handleMakeLive(currentVersion)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/60 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60 transition-all shadow-xs cursor-pointer"
+                title="Promote this loaded version to LIVE"
+              >
+                <Rocket className="size-3 text-emerald-400" />
+                <span>Make Live</span>
+              </button>
+            )}
 
           {/* Actionable Validation Status Badge */}
           <button
@@ -753,41 +1066,151 @@ export default function ProjectStudioPage() {
             Test Flow
           </button>
 
-          {/* Publish Button */}
-          <button
-            type="button"
-            onClick={() => setIsPublishModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-200 hover:border-neutral-700 hover:text-white transition-colors"
-          >
-            <Rocket className="size-3.5 text-emerald-400" />
-            Publish
-          </button>
+          {/* Unified Save & Version Split Control (Pattern B) */}
+          <div className="relative inline-flex items-center rounded-lg shadow-sm">
+            {/* Primary Action Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (workflows.length === 0 || currentWf?.isLive) {
+                  setIsPublishModalOpen(true);
+                } else {
+                  handleSaveWorkflow();
+                }
+              }}
+              disabled={saveStatus === 'saving'}
+              className="inline-flex items-center gap-1.5 rounded-l-lg bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-950 transition-all hover:bg-neutral-200 disabled:opacity-50 cursor-pointer"
+              title={
+                !validation.isValid
+                  ? `Cannot save: ${validation.summary.errors} validation error(s). Click to review issues.`
+                  : workflows.length === 0
+                  ? 'Configure and save initial version tag & note'
+                  : currentWf?.isLive
+                  ? 'LIVE version is immutable. Click to publish as new release'
+                  : 'Save draft changes (Ctrl+S)'
+              }
+            >
+              {saveStatus === 'saving' ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Saving…
+                </>
+              ) : saveStatus === 'saved' ? (
+                <>
+                  <Check className="size-3.5 text-emerald-600" />
+                  Saved!
+                </>
+              ) : workflows.length === 0 ? (
+                <>
+                  <Save className="size-3.5 text-brand-600" />
+                  Save Initial Version…
+                  {!validation.isValid && (
+                    <span className="size-1.5 rounded-full bg-red-500 animate-pulse" title={`${validation.summary.errors} errors`} />
+                  )}
+                </>
+              ) : currentWf?.isLive ? (
+                <>
+                  <Rocket className="size-3.5 text-brand-600" />
+                  Publish New Version…
+                </>
+              ) : (
+                <>
+                  <Save className="size-3.5" />
+                  Save Draft
+                  {!validation.isValid && (
+                    <span className="size-1.5 rounded-full bg-red-500 animate-pulse" title={`${validation.summary.errors} errors`} />
+                  )}
+                </>
+              )}
+            </button>
 
-          {/* Save Button */}
-          <button
-            type="button"
-            onClick={handleSaveWorkflow}
-            disabled={saveStatus === 'saving'}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-950 shadow-sm transition-all hover:bg-neutral-200 disabled:opacity-50"
-            title="Save workflow draft (Ctrl+S)"
-          >
-            {saveStatus === 'saving' ? (
-              <>
-                <Loader2 className="size-3.5 animate-spin" />
-                Saving…
-              </>
-            ) : saveStatus === 'saved' ? (
-              <>
-                <Check className="size-3.5 text-emerald-600" />
-                Saved!
-              </>
-            ) : (
-              <>
-                <Save className="size-3.5" />
-                Save
-              </>
+            {/* Split Dropdown Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsSaveMenuOpen((v) => !v)}
+              className="inline-flex items-center justify-center rounded-r-lg border-l border-neutral-300 bg-white px-2 py-1.5 text-neutral-900 transition-all hover:bg-neutral-200 cursor-pointer"
+              title="More versioning actions"
+            >
+              <ChevronDown className="size-3.5" />
+            </button>
+
+            {/* Dropdown Menu */}
+            {isSaveMenuOpen && (
+              <div
+                className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 text-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-2.5 py-1.5 text-[10px] font-semibold text-neutral-400 border-b border-neutral-900">
+                  VERSION ACTIONS
+                </div>
+
+                <div className="py-1 space-y-0.5">
+                  <button
+                    type="button"
+                    disabled={currentWf?.isLive || workflows.length === 0}
+                    onClick={() => {
+                      setIsSaveMenuOpen(false);
+                      handleSaveWorkflow();
+                    }}
+                    className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-neutral-200 hover:bg-neutral-900 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Save className="size-3.5 text-neutral-400" />
+                      <span>Save Draft</span>
+                    </div>
+                    <span className="text-[10px] text-neutral-500 font-mono">Ctrl+S</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSaveMenuOpen(false);
+                      setIsPublishModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-neutral-200 hover:bg-neutral-900 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Rocket className="size-3.5 text-brand-400" />
+                      <span>
+                        {workflows.length === 0
+                          ? 'Configure Initial Version…'
+                          : 'Save as New Version…'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {currentWf && !currentWf.isLive && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSaveMenuOpen(false);
+                        handleMakeLive(currentVersion);
+                      }}
+                      className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-emerald-300 hover:bg-emerald-950/40 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Rocket className="size-3.5 text-emerald-400" />
+                        <span>Make v{currentVersion} LIVE</span>
+                      </div>
+                    </button>
+                  )}
+                </div>
+
+                <div className="pt-1 border-t border-neutral-900">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSaveMenuOpen(false);
+                      setIsPublishModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <span>Version History ({workflows.length})</span>
+                  </button>
+                </div>
+              </div>
             )}
-          </button>
+          </div>
         </div>
       </header>
 
@@ -1339,28 +1762,41 @@ export default function ProjectStudioPage() {
         )}
       </div>
 
+      {/* ── Notification Toast ─────────────────────────────────────────── */}
+      {notification && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-neutral-700 bg-neutral-900/95 px-4 py-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-5 duration-200 text-xs">
+          <span
+            className={`size-2 rounded-full ${
+              notification.type === 'success'
+                ? 'bg-emerald-400'
+                : notification.type === 'error'
+                ? 'bg-rose-400'
+                : 'bg-brand-400'
+            }`}
+          />
+          <span className="font-medium text-white">{notification.message}</span>
+          <button
+            type="button"
+            onClick={() => setNotification(null)}
+            className="ml-2 text-neutral-400 hover:text-white"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* ── Publishing Modal ───────────────────────────────────────────── */}
       <PublishModal
+        projectId={projectId}
         graph={graph}
         validation={validation}
-        publishedVersions={publishedVersions}
+        workflows={workflows}
+        currentVersion={currentVersion}
         isOpen={isPublishModalOpen}
         onClose={() => setIsPublishModalOpen(false)}
-        onPublishVersion={(newVer) => {
-          const updated = [newVer, ...publishedVersions.map((v) => ({ ...v, isCurrentLive: false }))];
-          setPublishedVersions(updated);
-          localStorage.setItem(`quickgent_versions_${projectId}`, JSON.stringify(updated));
-        }}
-        onRollbackVersion={(v) => {
-          setGraph(deserializeFromCanonical(v.workflowSnapshot));
-          const updated = publishedVersions.map((item) => ({
-            ...item,
-            isCurrentLive: item.version === v.version,
-          }));
-          setPublishedVersions(updated);
-          localStorage.setItem(`quickgent_versions_${projectId}`, JSON.stringify(updated));
-          setIsPublishModalOpen(false);
-        }}
+        onSelectVersion={handleSelectVersion}
+        onMakeLive={handleMakeLive}
+        onPublishNewVersion={handlePublishNewVersion}
       />
 
       {/* ── Canonical JSON Modal ───────────────────────────────────────── */}

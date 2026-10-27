@@ -127,7 +127,7 @@ export const defaultConditionConfig: ConditionNodeConfig = {
       description: 'Queries regarding invoices, tiers, and refunds',
     },
   ],
-  defaultRoute: 'route_fallback',
+  defaultRoute: 'route_billing',
 };
 
 export const defaultHttpRequestConfig: HttpRequestNodeConfig = {

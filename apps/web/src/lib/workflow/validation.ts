@@ -398,7 +398,7 @@ export function validateWorkflow(graph: WorkflowGraph | CanonicalWorkflow): Work
   return {
     isValid: errors === 0,
     canExecute: errors === 0,
-    canPublish: errors === 0 && warnings === 0,
+    canPublish: errors === 0,
     issues,
     summary: {
       errors,

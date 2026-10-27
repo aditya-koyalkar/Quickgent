@@ -1,14 +1,8 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
 -- CreateEnum
 CREATE TYPE "AuthProvider" AS ENUM ('GOOGLE', 'GITHUB', 'CREDENTIALS');
 
 -- CreateEnum
 CREATE TYPE "MessageRole" AS ENUM ('USER', 'ASSISTANT', 'SYSTEM', 'TOOL');
-
--- CreateEnum
-CREATE TYPE "WorkflowStatus" AS ENUM ('DRAFT', 'LIVE', 'ARCHIVED');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -40,9 +34,9 @@ CREATE TABLE "projects" (
 -- CreateTable
 CREATE TABLE "workflows" (
     "id" TEXT NOT NULL,
-    "name" VARCHAR(100) NOT NULL DEFAULT 'Untitled Workflow',
+    "note" VARCHAR(255),
     "version" VARCHAR(20) NOT NULL,
-    "status" "WorkflowStatus" NOT NULL DEFAULT 'DRAFT',
+    "is_live" BOOLEAN NOT NULL DEFAULT false,
     "graph" JSONB NOT NULL,
     "projectId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,7 +85,7 @@ CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 CREATE INDEX "projects_userId_updatedAt_idx" ON "projects"("userId", "updatedAt");
 
 -- CreateIndex
-CREATE INDEX "workflows_projectId_status_idx" ON "workflows"("projectId", "status");
+CREATE INDEX "workflows_projectId_is_live_idx" ON "workflows"("projectId", "is_live");
 
 -- CreateIndex
 CREATE INDEX "workflows_projectId_createdAt_idx" ON "workflows"("projectId", "createdAt");

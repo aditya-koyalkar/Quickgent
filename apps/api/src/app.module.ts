@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { ProjectsModule } from './projects/projects.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -27,6 +28,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     RedisModule,
     AuthModule,
     ProjectsModule,
+    WorkflowsModule,
   ],
   controllers: [AppController],
   providers: [

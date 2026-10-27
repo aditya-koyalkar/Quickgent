@@ -25,12 +25,6 @@ enum MessageRole {
   TOOL
 }
 
-enum WorkflowStatus {
-  DRAFT
-  LIVE
-  ARCHIVED
-}
-
 model User {
   id           String       @id @default(uuid())
   username     String?      @unique @db.VarChar(50)
@@ -66,10 +60,10 @@ model Project {
 }
 
 model Workflow {
-  id        String         @id @default(uuid())
-  name      String         @default("Untitled Workflow") @db.VarChar(100)
-  version   String         @db.VarChar(20)
-  status    WorkflowStatus @default(DRAFT)
+  id        String   @id @default(uuid())
+  note      String?  @db.VarChar(255)
+  version   String   @db.VarChar(20)
+  isLive    Boolean  @default(false) @map("is_live")
   graph     Json
   projectId String
 
@@ -79,7 +73,7 @@ model Workflow {
   project Project @relation(fields: [projectId], references: [id])
 
   @@unique([projectId, version])
-  @@index([projectId, status])
+  @@index([projectId, isLive])
   @@index([projectId, createdAt])
   @@map("workflows")
 }

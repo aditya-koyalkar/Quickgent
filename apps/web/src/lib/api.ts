@@ -181,16 +181,19 @@ export interface ProjectItem {
   };
 }
 
+export interface WorkflowItem {
+  id: string;
+  note?: string | null;
+  version: string;
+  isLive: boolean;
+  graph: any;
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectDetail extends ProjectItem {
-  workflows: Array<{
-    id: string;
-    name: string;
-    version: string;
-    status: 'DRAFT' | 'LIVE' | 'ARCHIVED';
-    graph: any;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+  workflows: WorkflowItem[];
   conversations: Array<{
     id: string;
     name: string;
@@ -235,5 +238,41 @@ export const projectsApi = {
 
   update: (id: string, data: { name?: string; isActive?: boolean }) =>
     api.patch<ProjectItem>(`/projects/${id}`, data),
+};
+
+// ── Workflows API functions ─────────────────────────────────────────
+export interface CreateWorkflowPayload {
+  version: string;
+  json: Record<string, any>;
+  note?: string;
+}
+
+export interface UpdateWorkflowPayload {
+  json?: Record<string, any>;
+  note?: string;
+}
+
+export const workflowsApi = {
+  list: (projectId: string, isLive?: boolean) => {
+    const query = isLive !== undefined ? `?isLive=${isLive}` : '';
+    return api.get<WorkflowItem[]>(`/projects/${projectId}/workflows${query}`);
+  },
+
+  get: (projectId: string, version: string) =>
+    api.get<WorkflowItem>(`/projects/${projectId}/workflows/${version}`),
+
+  create: (projectId: string, data: CreateWorkflowPayload) =>
+    api.post<WorkflowItem>(`/projects/${projectId}/workflows`, data),
+
+  update: (projectId: string, version: string, data: UpdateWorkflowPayload) =>
+    api.patch<WorkflowItem>(`/projects/${projectId}/workflows/${version}`, data),
+
+  makeLive: (projectId: string, version: string) =>
+    api.post<WorkflowItem>(`/projects/${projectId}/workflows/${version}/live`),
+
+  delete: (projectId: string, version: string) =>
+    api.delete<{ success: boolean; message: string }>(
+      `/projects/${projectId}/workflows/${version}`,
+    ),
 };
 
