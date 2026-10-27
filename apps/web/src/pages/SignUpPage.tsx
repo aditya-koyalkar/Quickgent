@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Loader2 } from 'lucide-react';
-import { useSignUp } from '../hooks/useAuth';
+import { useAuth } from '../context/AuthContext';
 
 export default function SignUpPage() {
   const navigate = useNavigate();
-  const signUpMutation = useSignUp();
+  const { signUp } = useAuth();
+  const [isPending, setIsPending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -13,11 +15,15 @@ export default function SignUpPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setIsPending(true);
+    setErrorMessage(null);
     try {
-      await signUpMutation.mutateAsync({ username, email, password });
+      await signUp(username, email, password);
       navigate('/dashboard', { replace: true });
-    } catch {
-      // error captured by mutation state
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to create account. Please try again.');
+    } finally {
+      setIsPending(false);
     }
   };
 
@@ -121,9 +127,9 @@ export default function SignUpPage() {
               <div className="h-px flex-1 bg-neutral-200" />
             </div>
 
-            {signUpMutation.isError && (
+            {errorMessage && (
               <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
-                {signUpMutation.error.message}
+                {errorMessage}
               </div>
             )}
 
@@ -188,10 +194,10 @@ export default function SignUpPage() {
               {/* Submit */}
               <button
                 type="submit"
-                disabled={signUpMutation.isPending}
+                disabled={isPending}
                 className="inline-flex items-center gap-2 rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {signUpMutation.isPending ? (
+                {isPending ? (
                   <>
                     <Loader2 className="size-3.5 animate-spin" />
                     Creating account…

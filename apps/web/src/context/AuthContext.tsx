@@ -2,10 +2,13 @@ import {
   createContext,
   useContext,
   useCallback,
+  useState,
+  useEffect,
   type ReactNode,
 } from 'react';
-import { useMe, useSignIn, useSignUp, useLogout } from '../hooks/useAuth';
-import type { AuthUser } from '../lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { useMe, authKeys } from '../hooks/useAuth';
+import { authApi, type AuthUser } from '../lib/api';
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -19,32 +22,50 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const meQuery = useMe();
-  const signInMutation = useSignIn();
-  const signUpMutation = useSignUp();
-  const logoutMutation = useLogout();
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
-  const user = meQuery.data ?? null;
-  const isLoading = meQuery.isLoading;
+  // Synchronize currentUser with meQuery
+  useEffect(() => {
+    if (meQuery.data) {
+      setCurrentUser(meQuery.data);
+    } else if (meQuery.isError) {
+      setCurrentUser(null);
+    }
+  }, [meQuery.data, meQuery.isError]);
+
+  const user = currentUser ?? meQuery.data ?? null;
+  const isLoading = meQuery.isLoading && !currentUser;
   const isAuthenticated = !!user;
 
   const signIn = useCallback(
     async (emailOrUsername: string, password: string) => {
-      await signInMutation.mutateAsync({ emailOrUsername, password });
+      const response = await authApi.signIn({ emailOrUsername, password });
+      setCurrentUser(response.user);
+      queryClient.setQueryData(authKeys.me(), response.user);
     },
-    [signInMutation],
+    [queryClient],
   );
 
   const signUp = useCallback(
     async (username: string, email: string, password: string) => {
-      await signUpMutation.mutateAsync({ username, email, password });
+      const response = await authApi.signUp({ username, email, password });
+      setCurrentUser(response.user);
+      queryClient.setQueryData(authKeys.me(), response.user);
     },
-    [signUpMutation],
+    [queryClient],
   );
 
   const signOut = useCallback(async () => {
-    await logoutMutation.mutateAsync();
-  }, [logoutMutation]);
+    try {
+      await authApi.logout();
+    } finally {
+      setCurrentUser(null);
+      queryClient.setQueryData(authKeys.me(), null);
+      queryClient.invalidateQueries({ queryKey: authKeys.all });
+    }
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider
