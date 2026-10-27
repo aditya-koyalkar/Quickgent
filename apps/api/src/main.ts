@@ -30,7 +30,9 @@ async function bootstrap() {
 
   // CORS configuration supporting web app cookies & headers
   const allowedOrigins = [
-    ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : []),
+    ...(process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',')
+      : ['http://localhost:5173']),
   ];
 
   app.enableCors({

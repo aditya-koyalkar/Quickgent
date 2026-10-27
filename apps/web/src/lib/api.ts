@@ -16,10 +16,41 @@ export class ApiRequestError extends Error {
   }
 }
 
+let refreshPromise: Promise<boolean> | null = null;
+
+async function executeRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
+  retry = true,
 ): Promise<T> {
+  const isAuthEndpoint =
+    endpoint.startsWith('/auth/signin') ||
+    endpoint.startsWith('/auth/signup') ||
+    endpoint.startsWith('/auth/refresh') ||
+    endpoint.startsWith('/auth/logout');
+
+  // If a refresh is already in-flight, wait for it before sending new non-auth requests
+  if (!isAuthEndpoint && refreshPromise) {
+    await refreshPromise;
+  }
+
   const url = `${API_BASE}${endpoint}`;
 
   const config: RequestInit = {
@@ -34,6 +65,19 @@ async function request<T>(
   const response = await fetch(url, config);
 
   if (!response.ok) {
+    // Attempt automatic refresh on 401 for non-auth requests
+    if (response.status === 401 && !isAuthEndpoint && retry) {
+      if (!refreshPromise) {
+        refreshPromise = executeRefresh();
+      }
+
+      const refreshed = await refreshPromise;
+      if (refreshed) {
+        // Retry the original request once with newly issued cookies
+        return request<T>(endpoint, options, false);
+      }
+    }
+
     const errorBody: ApiError = await response.json().catch(() => ({
       message: 'An unexpected error occurred',
       statusCode: response.status,
