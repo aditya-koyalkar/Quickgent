@@ -276,3 +276,109 @@ export const workflowsApi = {
     ),
 };
 
+// ── Conversations & Copilot Chat API functions ──────────────────────
+export interface MessageItem {
+  id: string;
+  conversationId: string;
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
+  content: {
+    text: string;
+    suggestedWorkflow?: any;
+    highlights?: string[];
+  };
+  metadata?: any;
+  model?: string;
+  createdAt: string;
+}
+
+export interface ConversationItem {
+  id: string;
+  name: string;
+  projectId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    messages: number;
+  };
+  messages?: MessageItem[];
+  messagesMeta?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface ConversationsResponse {
+  data: ConversationItem[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface SendMessageResponse {
+  userMessage: MessageItem;
+  assistantMessage: MessageItem;
+  suggestedWorkflow?: any;
+  highlights?: string[];
+}
+
+export const conversationsApi = {
+  list: (projectId: string, params?: { page?: number; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    const query = searchParams.toString();
+    return api.get<ConversationsResponse>(
+      `/projects/${projectId}/conversations${query ? `?${query}` : ''}`,
+    );
+  },
+
+  get: (
+    projectId: string,
+    conversationId: string,
+    params?: { page?: number; limit?: number },
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    const query = searchParams.toString();
+    return api.get<ConversationItem>(
+      `/projects/${projectId}/conversations/${conversationId}${query ? `?${query}` : ''}`,
+    );
+  },
+
+  create: (projectId: string, data?: { name?: string }) =>
+    api.post<ConversationItem>(`/projects/${projectId}/conversations`, data || {}),
+
+  update: (
+    projectId: string,
+    conversationId: string,
+    data: { name?: string; isActive?: boolean },
+  ) =>
+    api.patch<ConversationItem>(
+      `/projects/${projectId}/conversations/${conversationId}`,
+      data,
+    ),
+
+  delete: (projectId: string, conversationId: string) =>
+    api.delete<{ success: boolean; message: string }>(
+      `/projects/${projectId}/conversations/${conversationId}`,
+    ),
+
+  sendMessage: (
+    projectId: string,
+    conversationId: string,
+    data: { message: string; currentWorkflow?: any },
+  ) =>
+    api.post<SendMessageResponse>(
+      `/projects/${projectId}/conversations/${conversationId}/messages`,
+      data,
+    ),
+};
+
+

@@ -29,6 +29,7 @@ import {
   Redo2,
   ChevronDown,
   X,
+  MessageSquare,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
 import {
@@ -37,6 +38,13 @@ import {
   useUpdateWorkflow,
   useMakeLiveWorkflow,
 } from '../hooks/useWorkflows';
+import {
+  useConversations,
+  useConversation,
+  useCreateConversation,
+  useSendMessage,
+  useDeleteConversation,
+} from '../hooks/useConversations';
 import type { WorkflowItem } from '../lib/api';
 import type {
   WorkflowNode,
@@ -52,7 +60,6 @@ import {
   createDefaultCanonicalWorkflow,
 } from '../lib/workflow/canonical';
 import { validateWorkflow } from '../lib/workflow/validation';
-import { generateWorkflowFromPrompt } from '../lib/workflow/copilot';
 import { NodeLibrary } from '../components/workflow/NodeLibrary';
 import { PropertiesPanel } from '../components/workflow/PropertiesPanel';
 import { ValidationPanel } from '../components/workflow/ValidationPanel';
@@ -130,25 +137,51 @@ export default function ProjectStudioPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  // AI Copilot Chat State
+  // AI Copilot Conversations State
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [isConversationDropdownOpen, setIsConversationDropdownOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const [isCopilotGenerating, setIsCopilotGenerating] = useState(false);
-  const [copilotMessages, setCopilotMessages] = useState<
-    Array<{
-      id: string;
-      role: 'user' | 'assistant';
-      content: string;
-      suggestedGraph?: WorkflowGraph;
-      highlights?: string[];
-    }>
-  >([
-    {
-      id: 'init_copilot',
-      role: 'assistant',
-      content:
-        'Hello! I can architect and generate AI workflows for you. Describe your goal (e.g. "Create a customer refund triage agent with API lookup") or pick a template.',
-    },
-  ]);
+  const [expandedJsonMessageIds, setExpandedJsonMessageIds] = useState<Set<string>>(new Set());
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
+  const toggleMessageJson = (messageId: string) => {
+    setExpandedJsonMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  };
+
+  const conversationsQuery = useConversations(projectId);
+  const conversations = useMemo(
+    () => conversationsQuery.data?.data || [],
+    [conversationsQuery.data],
+  );
+  const activeConversationQuery = useConversation(projectId, activeConversationId);
+  const createConversationMutation = useCreateConversation();
+  const sendMessageMutation = useSendMessage();
+  const deleteConversationMutation = useDeleteConversation();
+
+  const activeConversation = activeConversationQuery.data;
+  const conversationMessages = useMemo(() => {
+    return activeConversation?.messages || [];
+  }, [activeConversation]);
+
+  // Auto-select first conversation if available and none selected
+  useEffect(() => {
+    if (!activeConversationId && conversations.length > 0) {
+      setActiveConversationId(conversations[0].id);
+    }
+  }, [conversations, activeConversationId]);
+
+  // Auto-scroll chat to bottom on new messages
+  useEffect(() => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversationMessages, sendMessageMutation.isPending]);
 
   // Canvas Drag & Pan Tracking Refs
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -743,34 +776,83 @@ export default function ProjectStudioPage() {
     }
   };
 
-  // AI Copilot Handler
-  const handleSendCopilotPrompt = () => {
-    if (!chatInput.trim() || isCopilotGenerating) return;
-    const prompt = chatInput.trim();
-    setChatInput('');
+  // AI Copilot Conversation Handlers
+  const handleCreateNewConversation = async () => {
+    try {
+      const newConv = await createConversationMutation.mutateAsync({
+        projectId,
+        name: 'Workflow Architecture Chat',
+      });
+      setActiveConversationId(newConv.id);
+      setIsConversationDropdownOpen(false);
+      setNotification({
+        message: 'Started new conversation session',
+        type: 'info',
+      });
+      return newConv.id;
+    } catch (err: any) {
+      setNotification({
+        message: err?.response?.data?.message || 'Failed to create conversation',
+        type: 'error',
+      });
+      return null;
+    }
+  };
 
-    setCopilotMessages((prev) => [
-      ...prev,
-      { id: `user_${Date.now()}`, role: 'user', content: prompt },
-    ]);
-    setIsCopilotGenerating(true);
+  const handleDeleteConversation = async (convId: string, e: MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteConversationMutation.mutateAsync({
+        projectId,
+        conversationId: convId,
+      });
+      if (activeConversationId === convId) {
+        const remaining = conversations.filter((c) => c.id !== convId);
+        setActiveConversationId(remaining.length > 0 ? remaining[0].id : null);
+      }
+      setNotification({
+        message: 'Conversation deleted',
+        type: 'info',
+      });
+    } catch (err: any) {
+      setNotification({
+        message: err?.response?.data?.message || 'Failed to delete conversation',
+        type: 'error',
+      });
+    }
+  };
 
-    setTimeout(() => {
-      const result = generateWorkflowFromPrompt(prompt);
-      const generatedGraph = deserializeFromCanonical(result.workflow);
+  const handleSendCopilotPrompt = async (explicitPrompt?: string) => {
+    const promptToSend = (explicitPrompt ?? chatInput).trim();
+    if (!promptToSend || sendMessageMutation.isPending) return;
 
-      setCopilotMessages((prev) => [
-        ...prev,
-        {
-          id: `asst_${Date.now()}`,
-          role: 'assistant',
-          content: result.explanation,
-          highlights: result.architectureHighlights,
-          suggestedGraph: generatedGraph,
-        },
-      ]);
-      setIsCopilotGenerating(false);
-    }, 600);
+    if (!explicitPrompt) {
+      setChatInput('');
+    }
+
+    try {
+      let targetConvId = activeConversationId;
+      if (!targetConvId) {
+        targetConvId = await handleCreateNewConversation();
+        if (!targetConvId) return;
+      }
+
+      const currentCanonical = serializeToCanonical(graph);
+
+      await sendMessageMutation.mutateAsync({
+        projectId,
+        conversationId: targetConvId,
+        message: promptToSend,
+        currentWorkflow: currentCanonical,
+      });
+    } catch (err: any) {
+      setNotification({
+        message:
+          err?.response?.data?.message ||
+          'Failed to generate workflow from AI. Please check engine connection.',
+        type: 'error',
+      });
+    }
   };
 
   return (
@@ -1639,20 +1721,109 @@ export default function ProjectStudioPage() {
         {/* ── AI Copilot Drawer ────────────────────────────────────────── */}
         {isCopilotOpen && (
           <aside className="w-96 shrink-0 border-l border-neutral-800 bg-neutral-950 flex flex-col z-20 text-xs">
-            <div className="flex h-13 items-center justify-between border-b border-neutral-800 px-4">
-              <div className="flex items-center gap-2">
-                <div className="flex size-6 items-center justify-center rounded-md bg-brand-500 text-white">
+            {/* Drawer Header with Conversation Switcher */}
+            <div className="flex h-13 items-center justify-between border-b border-neutral-800 px-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex size-6 items-center justify-center rounded-md bg-brand-500 text-white shrink-0">
                   <Sparkles className="size-3.5" />
                 </div>
-                <span className="font-semibold text-white">AI Workflow Architect</span>
+
+                {/* Conversation Switcher Dropdown */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsConversationDropdownOpen((v) => !v)}
+                    className="flex items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs font-semibold text-white hover:border-neutral-700 transition-colors max-w-[155px] truncate"
+                    title="Switch or view conversations"
+                  >
+                    <span className="truncate">
+                      {conversations.find((c) => c.id === activeConversationId)?.name || 'Conversations'}
+                    </span>
+                    <ChevronDown className="size-3 text-neutral-400 shrink-0" />
+                  </button>
+
+                  {isConversationDropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1.5 w-64 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-2xl z-50">
+                      <div className="flex items-center justify-between px-2 py-1 border-b border-neutral-800 mb-1">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                          Chats ({conversations.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleCreateNewConversation}
+                          className="flex items-center gap-1 text-[11px] text-brand-400 hover:text-brand-300 font-medium cursor-pointer"
+                        >
+                          <Plus className="size-3" />
+                          New
+                        </button>
+                      </div>
+
+                      <div className="max-h-56 overflow-y-auto space-y-0.5">
+                        {conversations.length === 0 ? (
+                          <div className="px-2 py-3 text-center text-[11px] text-neutral-500">
+                            No conversations yet
+                          </div>
+                        ) : (
+                          conversations.map((conv) => {
+                            const isSelected = conv.id === activeConversationId;
+                            return (
+                              <div
+                                key={conv.id}
+                                onClick={() => {
+                                  setActiveConversationId(conv.id);
+                                  setIsConversationDropdownOpen(false);
+                                }}
+                                className={`flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer text-xs transition-colors ${
+                                  isSelected
+                                    ? 'bg-neutral-900 text-white font-medium'
+                                    : 'text-neutral-300 hover:bg-neutral-900/60 hover:text-white'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <MessageSquare className="size-3 text-neutral-400 shrink-0" />
+                                  <span className="truncate">{conv.name}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                  <span className="text-[10px] text-neutral-500">
+                                    {conv._count?.messages || 0}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDeleteConversation(conv.id, e)}
+                                    className="text-neutral-500 hover:text-rose-400 p-0.5 transition-colors cursor-pointer"
+                                    title="Delete conversation"
+                                  >
+                                    <Trash2 className="size-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsCopilotOpen(false)}
-                className="text-neutral-400 hover:text-white"
-              >
-                ✕
-              </button>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleCreateNewConversation}
+                  className="flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] font-medium text-neutral-300 hover:border-neutral-700 hover:text-white transition-colors cursor-pointer"
+                  title="Start a new conversation"
+                >
+                  <Plus className="size-3" />
+                  New
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCopilotOpen(false)}
+                  className="text-neutral-400 hover:text-white p-1"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Quick Template Chips */}
@@ -1669,12 +1840,9 @@ export default function ProjectStudioPage() {
                   <button
                     key={blueprint}
                     type="button"
-                    onClick={() => {
-                      const res = generateWorkflowFromPrompt(blueprint);
-                      updateGraphWithHistory(() => deserializeFromCanonical(res.workflow));
-                      setTimeout(() => handleFitView(), 50);
-                    }}
-                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-brand-500 hover:text-white transition-colors"
+                    onClick={() => handleSendCopilotPrompt(blueprint)}
+                    disabled={sendMessageMutation.isPending}
+                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 hover:border-brand-500 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {blueprint}
                   </button>
@@ -1684,53 +1852,154 @@ export default function ProjectStudioPage() {
 
             {/* Chat Thread */}
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
-              {copilotMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-                >
-                  <div
-                    className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-brand-600 text-white'
-                        : 'border border-neutral-800 bg-neutral-900 text-neutral-200'
-                    }`}
-                  >
-                    <p>{msg.content}</p>
-
-                    {msg.highlights && (
-                      <ul className="mt-2 space-y-1 list-disc list-inside text-[11px] text-neutral-300">
-                        {msg.highlights.map((h, i) => (
-                          <li key={i}>{h}</li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {msg.suggestedGraph && (
-                      <div className="mt-3 pt-2 border-t border-neutral-800">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            updateGraphWithHistory(() => msg.suggestedGraph!);
-                            setTimeout(() => handleFitView(), 50);
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1 font-semibold text-neutral-950 hover:bg-neutral-200 transition-colors shadow-xs"
-                        >
-                          <Play className="size-3 fill-neutral-950" />
-                          Apply Generated Graph to Canvas
-                        </button>
-                      </div>
-                    )}
+              {conversationMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-6 text-center text-neutral-400">
+                  <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                    <Sparkles className="size-5" />
                   </div>
+                  <p className="text-xs font-medium text-neutral-200">Start an AI Architecture Session</p>
+                  <p className="mt-1 text-[11px] text-neutral-400 leading-normal">
+                    Describe your agent goals or select a blueprint above. AI Copilot will build and evolve your workflow canvas.
+                  </p>
                 </div>
-              ))}
+              ) : (
+                conversationMessages.map((msg) => {
+                  const isUser = msg.role === 'USER';
+                  const text =
+                    typeof msg.content === 'object' && msg.content !== null
+                      ? msg.content.text
+                      : String(msg.content);
+                  const suggestedWf =
+                    typeof msg.content === 'object' && msg.content !== null
+                      ? msg.content.suggestedWorkflow
+                      : undefined;
+                  const highlights =
+                    typeof msg.content === 'object' && msg.content !== null
+                      ? msg.content.highlights
+                      : undefined;
 
-              {isCopilotGenerating && (
-                <div className="flex items-center gap-2 text-neutral-400">
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+                    >
+                      <div
+                        className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 leading-relaxed ${
+                          isUser
+                            ? 'bg-brand-600 text-white'
+                            : 'border border-neutral-800 bg-neutral-900 text-neutral-200 shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1 text-[10px] text-neutral-400 font-mono">
+                          <span>{isUser ? 'You' : (msg.model || 'Quickgent AI Architect')}</span>
+                          <span>•</span>
+                          <span>
+                            {new Date(msg.createdAt).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+
+                        <p className="whitespace-pre-wrap">{text}</p>
+
+                        {highlights && highlights.length > 0 && (
+                          <div className="mt-2.5 pt-2 border-t border-neutral-800">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                              Key Architectural Highlights:
+                            </span>
+                            <ul className="mt-1 space-y-1 list-disc list-inside text-[11px] text-neutral-300">
+                              {highlights.map((h, i) => (
+                                <li key={i}>{h}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {suggestedWf && (
+                          <div className="mt-3 pt-2.5 border-t border-neutral-800 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-brand-300 font-medium">
+                                {suggestedWf.nodes?.length || 0} nodes generated
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMessageJson(msg.id)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                                  title="Inspect AI returned workflow JSON"
+                                >
+                                  <Code2 className="size-3" />
+                                  {expandedJsonMessageIds.has(msg.id) ? 'Hide JSON' : 'View JSON'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      const deserialized = deserializeFromCanonical(suggestedWf);
+                                      updateGraphWithHistory(() => deserialized);
+                                      setTimeout(() => handleFitView(), 50);
+                                      setNotification({
+                                        message: 'Applied AI suggested workflow to canvas!',
+                                        type: 'success',
+                                      });
+                                    } catch (e: any) {
+                                      setNotification({
+                                        message: 'Failed to apply workflow: ' + (e?.message || 'Invalid format'),
+                                        type: 'error',
+                                      });
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 hover:bg-brand-400 text-white px-2.5 py-1 font-semibold text-[11px] transition-colors shadow-sm cursor-pointer"
+                                >
+                                  <Play className="size-3 fill-white" />
+                                  Apply to Canvas
+                                </button>
+                              </div>
+                            </div>
+
+                            {expandedJsonMessageIds.has(msg.id) && (
+                              <div className="relative mt-2 rounded-xl border border-neutral-800 bg-neutral-950 p-2.5 text-[10px] font-mono text-neutral-300 max-h-56 overflow-y-auto">
+                                <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-neutral-800/60">
+                                  <span className="text-[10px] text-neutral-400 font-sans font-medium">
+                                    Generated Workflow JSON
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(JSON.stringify(suggestedWf, null, 2));
+                                      setNotification({
+                                        message: 'Copied workflow JSON to clipboard!',
+                                        type: 'info',
+                                      });
+                                    }}
+                                    className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                                    title="Copy JSON"
+                                  >
+                                    <Copy className="size-3" />
+                                    <span>Copy</span>
+                                  </button>
+                                </div>
+                                <pre className="whitespace-pre-wrap select-text leading-relaxed">
+                                  {JSON.stringify(suggestedWf, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              {sendMessageMutation.isPending && (
+                <div className="flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3.5 py-2.5 text-neutral-400">
                   <Loader2 className="size-3.5 animate-spin text-brand-400" />
-                  Generating workflow architecture...
+                  <span>Architecting workflow with Gemini AI...</span>
                 </div>
               )}
+              <div ref={chatMessagesEndRef} />
             </div>
 
             {/* Input Form */}
@@ -1748,11 +2017,12 @@ export default function ProjectStudioPage() {
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Describe your agent workflow..."
                   className="w-full rounded-xl border border-neutral-800 bg-neutral-900 py-2 pl-3 pr-10 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none"
+                  disabled={sendMessageMutation.isPending}
                 />
                 <button
                   type="submit"
-                  disabled={!chatInput.trim() || isCopilotGenerating}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex size-7 items-center justify-center rounded-lg bg-brand-600 text-white disabled:opacity-30"
+                  disabled={!chatInput.trim() || sendMessageMutation.isPending}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex size-7 items-center justify-center rounded-lg bg-brand-600 text-white disabled:opacity-30 cursor-pointer"
                 >
                   <Send className="size-3.5" />
                 </button>

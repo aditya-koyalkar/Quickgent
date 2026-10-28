@@ -29,9 +29,10 @@ async function bootstrap() {
   );
 
   // CORS configuration supporting web app cookies & headers
+  const corsOriginsStr = process.env.API_CORS_ORIGIN || process.env.CORS_ORIGIN;
   const allowedOrigins = [
-    ...(process.env.CORS_ORIGIN
-      ? process.env.CORS_ORIGIN.split(',')
+    ...(corsOriginsStr
+      ? corsOriginsStr.split(',').map((s) => s.trim())
       : ['http://localhost:5173']),
   ];
 
@@ -50,7 +51,7 @@ async function bootstrap() {
     exposedHeaders: ['Set-Cookie'],
   });
 
-  const port = process.env.PORT ?? process.env.API_PORT ?? 3000;
+  const port = process.env.API_PORT ?? process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');
 
   logger.log(`API server is running on PORT : ${port}`, 'Bootstrap');
