@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Rocket,
   AlertCircle,
@@ -11,6 +11,8 @@ import {
   Sparkles,
   ArrowRight,
   Clock,
+  Bot,
+  ExternalLink,
 } from 'lucide-react';
 import type {
   WorkflowGraph,
@@ -68,15 +70,59 @@ export function PublishModal({
   const [makeLiveImmediately, setMakeLiveImmediately] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [isCopied, setIsCopied] = useState(false);
+  const [isSnippetCopied, setIsSnippetCopied] = useState(false);
+  const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'publish' | 'history' | 'api'>('publish');
+  const [selectedVersionTag, setSelectedVersionTag] = useState<string>(currentVersion);
+
+  // Sync selectedVersionTag when modal opens or currentVersion changes
+  useEffect(() => {
+    if (currentVersion) {
+      setSelectedVersionTag(currentVersion);
+    }
+  }, [currentVersion, isOpen]);
 
   // Track live version
   const liveWorkflow = workflows.find((w) => w.isLive);
 
-  if (!isOpen) return null;
+  // Resolve currently inspected workflow version
+  const selectedWorkflow = useMemo(() => {
+    return (
+      workflows.find((w) => w.version === selectedVersionTag) ||
+      workflows.find((w) => w.version === currentVersion) ||
+      workflows[0] ||
+      null
+    );
+  }, [workflows, selectedVersionTag, currentVersion]);
 
-  const endpointUrl = `${window.location.origin}/api/projects/${projectId}/workflows/live`;
+  const endpointUrl = typeof window !== 'undefined'
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/projects/${projectId}/workflows/live`
+    : '';
+
+  const curlSnippet = useMemo(() => {
+    let sampleInputs: Record<string, any> = { user_message: 'Hello agent!' };
+
+    const graphData = selectedWorkflow?.graph || _graph;
+    if (graphData?.nodes && Array.isArray(graphData.nodes)) {
+      const startNode = graphData.nodes.find((n: any) => n.type === 'start');
+      if (startNode?.data?.config?.inputFields?.length) {
+        sampleInputs = {};
+        startNode.data.config.inputFields.forEach((f: any) => {
+          sampleInputs[f.name] = f.defaultValue || `sample_${f.name}`;
+        });
+      }
+    }
+
+    const payload = JSON.stringify({ inputs: sampleInputs }, null, 2)
+      .split('\n')
+      .map((line, idx) => (idx === 0 ? line : `  ${line}`))
+      .join('\n');
+
+    return `curl -X POST ${endpointUrl} \\
+  -H "Authorization: Bearer <YOUR_API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '${payload}'`;
+  }, [endpointUrl, selectedWorkflow, _graph]);
 
   const handlePublish = async () => {
     if (!validation.isValid) {
@@ -105,7 +151,12 @@ export function PublishModal({
         note: note.trim(),
         makeLiveImmediately,
       });
-      setActiveTab('history');
+      setSelectedVersionTag(versionTag.trim());
+      if (makeLiveImmediately) {
+        setActiveTab('api');
+      } else {
+        setActiveTab('history');
+      }
     } catch (err: any) {
       setActionError(err.message || 'Failed to publish workflow version');
     } finally {
@@ -118,6 +169,7 @@ export function PublishModal({
       setIsSubmitting(true);
       setActionError(null);
       await onMakeLive(version);
+      setSelectedVersionTag(version);
     } catch (err: any) {
       setActionError(err.message || 'Failed to make version LIVE');
     } finally {
@@ -125,14 +177,7 @@ export function PublishModal({
     }
   };
 
-  const curlSnippet = `curl -X POST ${endpointUrl} \\
-  -H "Authorization: Bearer <YOUR_API_KEY>" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "inputs": {
-      "user_message": "Hello agent!"
-    }
-  }'`;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-in fade-in duration-150">
@@ -452,6 +497,34 @@ export function PublishModal({
                       </span>
 
                       <div className="flex items-center gap-2">
+                        {isLive ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedVersionTag(wf.version);
+                              setActiveTab('api');
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-300 hover:bg-emerald-900/40 transition-colors cursor-pointer"
+                            title="View Live Endpoint & Snippet"
+                          >
+                            <Terminal className="size-3 text-emerald-400" />
+                            Live API
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedVersionTag(wf.version);
+                              setActiveTab('api');
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-neutral-700 bg-neutral-800 px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors cursor-pointer"
+                            title="View Version Details & Deployment Status"
+                          >
+                            <Terminal className="size-3 text-neutral-400" />
+                            Details
+                          </button>
+                        )}
+
                         {!isSelected && (
                           <button
                             type="button"
@@ -489,55 +562,220 @@ export function PublishModal({
         {/* ── 3. Live API Deployment Tab ─────────────────────────────────── */}
         {activeTab === 'api' && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-white">Project Live Endpoint</span>
-                {liveWorkflow ? (
-                  <span className="rounded px-2 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-800/40 text-[10px] font-mono">
-                    LIVE: v{liveWorkflow.version}
-                  </span>
-                ) : (
-                  <span className="rounded px-2 py-0.5 bg-amber-950 text-amber-400 border border-amber-800/40 text-[10px] font-mono">
-                    NO LIVE VERSION YET
-                  </span>
-                )}
-              </div>
-              <div className="font-mono text-[11px] text-neutral-300 bg-black/60 p-2.5 rounded-lg break-all border border-neutral-800">
-                {endpointUrl}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-neutral-300 font-semibold">
-                  <Terminal className="size-3.5 text-brand-400" />
-                  <span>cURL Integration Snippet</span>
+            {workflows.length === 0 ? (
+              <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 text-center space-y-3">
+                <div className="mx-auto flex size-10 items-center justify-center rounded-xl bg-neutral-800/80 border border-neutral-700 text-neutral-400">
+                  <Layers className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <div className="font-semibold text-white">No Published Versions</div>
+                  <p className="text-[11px] text-neutral-400 max-w-sm mx-auto">
+                    Save and publish an initial workflow version to configure and activate a live deployment endpoint.
+                  </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(curlSnippet);
-                    setIsCopied(true);
-                    setTimeout(() => setIsCopied(false), 2000);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] text-neutral-400 hover:text-white transition-colors"
+                  onClick={() => setActiveTab('publish')}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-500 shadow-md transition-all cursor-pointer"
                 >
-                  {isCopied ? (
-                    <>
-                      <Check className="size-3 text-emerald-400" /> Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="size-3" /> Copy cURL
-                    </>
-                  )}
+                  <Sparkles className="size-3.5" />
+                  Save Initial Version
                 </button>
               </div>
+            ) : (
+              <>
+                {/* Version Selector Header */}
+                <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900/60 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-neutral-400">Inspecting Version:</span>
+                    <select
+                      value={selectedWorkflow?.version || ''}
+                      onChange={(e) => setSelectedVersionTag(e.target.value)}
+                      className="rounded-lg border border-neutral-700 bg-black/60 px-2.5 py-1 text-xs text-white font-mono focus:border-brand-500 focus:outline-none cursor-pointer"
+                    >
+                      {workflows.map((wf) => (
+                        <option key={wf.version} value={wf.version}>
+                          v{wf.version} {wf.isLive ? '• LIVE' : '• DRAFT'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <pre className="max-h-48 overflow-x-auto rounded-xl border border-neutral-800 bg-black/80 p-3 font-mono text-[11px] text-neutral-300 leading-relaxed">
-                {curlSnippet}
-              </pre>
-            </div>
+                  <div>
+                    {selectedWorkflow?.isLive ? (
+                      <span className="rounded-lg px-2.5 py-1 bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 text-[10px] font-mono font-semibold flex items-center gap-1.5 shadow-xs">
+                        <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        LIVE (Active)
+                      </span>
+                    ) : (
+                      <span className="rounded-lg px-2.5 py-1 bg-neutral-800 border border-neutral-700 text-neutral-400 text-[10px] font-mono font-semibold">
+                        DRAFT (Not Live)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Selected Version Metadata Card */}
+                {selectedWorkflow && (
+                  <div className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-3 space-y-1.5 text-[11px]">
+                    <div className="flex items-center justify-between text-neutral-400 text-[10px]">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="size-3 text-neutral-500" />
+                        <span>Published {new Date(selectedWorkflow.createdAt).toLocaleDateString()}</span>
+                      </div>
+                      <span>
+                        Updated {new Date(selectedWorkflow.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    {selectedWorkflow.note ? (
+                      <p className="text-neutral-300 bg-black/40 p-2 rounded-lg border border-neutral-900 leading-relaxed font-sans">
+                        {selectedWorkflow.note}
+                      </p>
+                    ) : (
+                      <p className="text-neutral-500 italic">No changelog note recorded for this version.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Only display Live Endpoint & cURL Snippet when the selected version is LIVE */}
+                {selectedWorkflow?.isLive ? (
+                  <div className="space-y-4 animate-in fade-in duration-150">
+                    {/* Live Agent Chat Launch Card */}
+                    <div className="flex items-center justify-between rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-3 shadow-md">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <Bot className="size-4 text-emerald-400" />
+                          <span className="font-semibold text-white text-xs">
+                            Live Agent Interactive Chat
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-300/80">
+                          Chat with this agent running version v{selectedWorkflow.version} in real-time.
+                        </p>
+                      </div>
+
+                      <a
+                        href={`/projects/${projectId}/workflows/live`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md transition-all cursor-pointer shrink-0"
+                      >
+                        <span>Chat with Agent</span>
+                        <ExternalLink className="size-3" />
+                      </a>
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white">Live Execution Endpoint</span>
+                          <span className="rounded px-1.5 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-800/40 text-[9px] font-mono">
+                            Routing to v{selectedWorkflow.version}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(endpointUrl);
+                            setIsUrlCopied(true);
+                            setTimeout(() => setIsUrlCopied(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          {isUrlCopied ? (
+                            <>
+                              <Check className="size-3 text-emerald-400" /> Copied URL!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="size-3" /> Copy URL
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="font-mono text-[11px] text-neutral-300 bg-black/60 p-2.5 rounded-lg break-all border border-neutral-800">
+                        {endpointUrl}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-neutral-300 font-semibold">
+                          <Terminal className="size-3.5 text-brand-400" />
+                          <span>cURL Integration Snippet</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(curlSnippet);
+                            setIsSnippetCopied(true);
+                            setTimeout(() => setIsSnippetCopied(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          {isSnippetCopied ? (
+                            <>
+                              <Check className="size-3 text-emerald-400" /> Copied Snippet!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="size-3" /> Copy cURL
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <pre className="max-h-48 overflow-x-auto rounded-xl border border-neutral-800 bg-black/80 p-3 font-mono text-[11px] text-neutral-300 leading-relaxed">
+                        {curlSnippet}
+                      </pre>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="size-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div className="font-semibold text-amber-200">
+                          Version v{selectedWorkflow?.version || currentVersion} is not LIVE
+                        </div>
+                        <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                          The live execution endpoint and cURL integration snippets are only generated for versions that are promoted to LIVE.
+                          This version is currently stored as a draft and cannot receive live API traffic.
+                        </p>
+                      </div>
+                    </div>
+
+                    {liveWorkflow && (
+                      <div className="rounded-lg bg-black/40 border border-neutral-800 p-2.5 text-[11px] text-neutral-400 flex items-center justify-between">
+                        <span>Current Live Version:</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedVersionTag(liveWorkflow.version)}
+                          className="font-mono text-emerald-400 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="size-1.5 rounded-full bg-emerald-400" />
+                          v{liveWorkflow.version} (LIVE) →
+                        </button>
+                      </div>
+                    )}
+
+                    {selectedWorkflow && (
+                      <div className="pt-2 border-t border-amber-900/30 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => handleMakeLiveClick(selectedWorkflow.version)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-semibold text-white shadow-md transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <Rocket className="size-3.5 text-white" />
+                          Make v{selectedWorkflow.version} LIVE
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

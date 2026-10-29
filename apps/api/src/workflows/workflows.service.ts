@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -12,15 +13,25 @@ import {
   CreateWorkflowDto,
   UpdateWorkflowDto,
   GetWorkflowsQueryDto,
+  ExecuteWorkflowDto,
+  LiveWorkflowChatDto,
 } from './dto';
 
 @Injectable()
 export class WorkflowsService {
+  private readonly engineUrl: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
     private readonly logger: LoggerService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.engineUrl =
+      this.configService.get<string>('ENGINE_URL') ||
+      process.env.ENGINE_URL ||
+      'http://engine:8000';
+  }
 
   /**
    * Helper to verify project exists and belongs to the user
@@ -218,9 +229,47 @@ export class WorkflowsService {
   }
 
   /**
+   * Get currently active LIVE workflow for a project
+   */
+  async findLive(projectId: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, isActive: true },
+      select: { id: true, name: true, userId: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const workflow = await this.prisma.workflow.findFirst({
+      where: {
+        projectId,
+        isLive: true,
+      },
+      include: {
+        project: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    if (!workflow) {
+      throw new NotFoundException(
+        'No active LIVE workflow version found for this project.',
+      );
+    }
+
+    return workflow;
+  }
+
+  /**
    * Get single workflow by version tag or ID
    */
   async findOne(userId: string, projectId: string, versionOrId: string) {
+    if (versionOrId === 'live') {
+      return this.findLive(projectId);
+    }
+
     await this.verifyProjectAccess(userId, projectId);
 
     const workflow = await this.prisma.workflow.findFirst({
@@ -397,5 +446,266 @@ export class WorkflowsService {
       success: true,
       message: `Workflow version ${target.version} has been deleted.`,
     };
+  }
+
+  /**
+   * Execute live workflow graph using Python Engine
+   */
+  async executeLive(projectId: string, dto: ExecuteWorkflowDto) {
+    const liveWorkflow = await this.findLive(projectId);
+
+    // Normalize inputs
+    const inputs: Record<string, any> = { ...(dto.inputs || {}) };
+    if (dto.user_message) inputs.user_message = dto.user_message;
+    if (dto.message && !inputs.user_message) inputs.user_message = dto.message;
+
+    const engineUrl = `${this.engineUrl}/workflow/execute`;
+    this.logger.log(
+      `Executing live workflow v${liveWorkflow.version} for project ${projectId}`,
+      'WorkflowsService',
+    );
+
+    let engineResult: any;
+    try {
+      const resp = await fetch(engineUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflow: liveWorkflow.graph,
+          inputs,
+          session_id: dto.sessionId,
+        }),
+      });
+
+      if (!resp.ok) {
+        let errDetail = `Engine error (status ${resp.status})`;
+        try {
+          const errJson = await resp.json();
+          errDetail = errJson.detail || errDetail;
+        } catch {}
+        throw new BadRequestException(errDetail);
+      }
+
+      engineResult = await resp.json();
+    } catch (err: any) {
+      this.logger.error(
+        `Live workflow execution failed: ${err.message}`,
+        err.stack,
+        'WorkflowsService',
+      );
+      if (err instanceof BadRequestException) throw err;
+      throw new BadRequestException(err.message || 'Workflow execution failed');
+    }
+
+    // Persist execution audit log in database
+    const execution = await this.prisma.workflowExecution.create({
+      data: {
+        workflowId: liveWorkflow.id,
+        projectId,
+        status: engineResult.status || 'COMPLETED',
+        inputs,
+        outputs: engineResult.outputs || {},
+        state: engineResult.state || {},
+        trace: engineResult.step_traces || [],
+        durationMs: Math.round(engineResult.total_duration_ms || 0),
+        totalTokens: engineResult.total_tokens || 0,
+      },
+    });
+
+    return {
+      executionId: execution.id,
+      workflowVersion: liveWorkflow.version,
+      status: engineResult.status,
+      response: engineResult.response_text,
+      outputs: engineResult.outputs,
+      state: engineResult.state,
+      stepTraces: engineResult.step_traces,
+      totalDurationMs: engineResult.total_duration_ms,
+      totalTokens: engineResult.total_tokens,
+    };
+  }
+
+  /**
+   * Multi-turn chat with live workflow agent
+   */
+  async chatLive(
+    projectId: string,
+    dto: LiveWorkflowChatDto,
+    _userId?: string,
+  ) {
+    const liveWorkflow = await this.findLive(projectId);
+    const userText = dto.message?.trim();
+    if (!userText) {
+      throw new BadRequestException('Message cannot be empty');
+    }
+
+    // Find or create live conversation
+    let conversation: any;
+    if (dto.conversationId) {
+      conversation = await this.prisma.conversation.findFirst({
+        where: { id: dto.conversationId, projectId, isActive: true },
+      });
+    }
+
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: {
+          projectId,
+          workflowId: liveWorkflow.id,
+          workflowVersion: liveWorkflow.version,
+          isLive: true,
+          name: userText.length > 35 ? `${userText.slice(0, 35)}…` : userText,
+        },
+      });
+    }
+
+    // Store user message
+    const userMessage = await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'USER',
+        content: { text: userText },
+        metadata: {
+          workflowId: liveWorkflow.id,
+          workflowVersion: liveWorkflow.version,
+          isLive: true,
+        },
+      },
+    });
+
+    // Fetch previous conversation history (last 10 messages)
+    const recentMessages = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+        id: { not: userMessage.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { role: true, content: true },
+    });
+
+    const conversationHistory = recentMessages.reverse().map((m) => {
+      const c = m.content as any;
+      const text = typeof c === 'string' ? c : c?.text || JSON.stringify(c);
+      return {
+        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
+        content: text,
+      };
+    });
+
+    // Execute workflow in engine with inputs
+    const engineUrl = `${this.engineUrl}/workflow/execute`;
+    let engineResult: any;
+    try {
+      const resp = await fetch(engineUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflow: liveWorkflow.graph,
+          inputs: { user_message: userText },
+          session_id: conversation.id,
+          conversation_history: conversationHistory,
+        }),
+      });
+
+      if (!resp.ok) {
+        let errDetail = `Engine error (${resp.status})`;
+        try {
+          const errJson = await resp.json();
+          errDetail = errJson.detail || errDetail;
+        } catch {}
+        throw new BadRequestException(errDetail);
+      }
+
+      engineResult = await resp.json();
+    } catch (err: any) {
+      this.logger.error(
+        `Live chat execution failed: ${err.message}`,
+        err.stack,
+        'WorkflowsService',
+      );
+      if (err instanceof BadRequestException) throw err;
+      throw new BadRequestException(
+        err.message || 'Agent failed to run workflow',
+      );
+    }
+
+    // Save assistant message
+    const assistantMessage = await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'ASSISTANT',
+        content: {
+          text: engineResult.response_text,
+          outputs: engineResult.outputs,
+        },
+        metadata: {
+          workflowId: liveWorkflow.id,
+          workflowVersion: liveWorkflow.version,
+          executionId: engineResult.execution_id,
+          stepTraces: engineResult.step_traces,
+          durationMs: engineResult.total_duration_ms,
+        },
+        model: 'gemini-workflow-agent',
+      },
+    });
+
+    // Persist workflow execution record
+    const execution = await this.prisma.workflowExecution.create({
+      data: {
+        workflowId: liveWorkflow.id,
+        projectId,
+        status: engineResult.status || 'COMPLETED',
+        inputs: { user_message: userText },
+        outputs: engineResult.outputs || {},
+        state: engineResult.state || {},
+        trace: engineResult.step_traces || [],
+        durationMs: Math.round(engineResult.total_duration_ms || 0),
+        totalTokens: engineResult.total_tokens || 0,
+      },
+    });
+
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date() },
+    });
+
+    return {
+      conversationId: conversation.id,
+      userMessage,
+      assistantMessage,
+      reply: engineResult.response_text,
+      executionId: execution.id,
+      stepTraces: engineResult.step_traces,
+      totalDurationMs: engineResult.total_duration_ms,
+      totalTokens: engineResult.total_tokens,
+      workflow: {
+        id: liveWorkflow.id,
+        version: liveWorkflow.version,
+        note: liveWorkflow.note,
+        project: liveWorkflow.project,
+      },
+    };
+  }
+
+  /**
+   * Fetch a live conversation and its messages
+   */
+  async getLiveConversation(projectId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, projectId, isActive: true },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+          take: 50,
+        },
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    return conversation;
   }
 }

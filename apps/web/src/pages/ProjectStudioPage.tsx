@@ -30,6 +30,9 @@ import {
   ChevronDown,
   X,
   MessageSquare,
+  Bot,
+  ExternalLink,
+  LayoutGrid,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
 import {
@@ -58,6 +61,7 @@ import {
   deserializeFromCanonical,
   serializeToCanonical,
   createDefaultCanonicalWorkflow,
+  autoLayoutNodes,
 } from '../lib/workflow/canonical';
 import { validateWorkflow } from '../lib/workflow/validation';
 import { NodeLibrary } from '../components/workflow/NodeLibrary';
@@ -240,84 +244,6 @@ export default function ProjectStudioPage() {
     }
   }, [project?.name]);
 
-  // Load Initial Workflow from Backend or LocalStorage (run once on mount/data ready)
-  useEffect(() => {
-    if (initialLoadedRef.current) return;
-    if (!projectId) return;
-    if (workflowsQuery.isLoading) return;
-
-    initialLoadedRef.current = true;
-
-    if (workflows.length > 0) {
-      // Prefer LIVE workflow, otherwise latest created workflow
-      const live = workflows.find((w) => w.isLive);
-      const target = live || workflows[0];
-      if (target) {
-        setCurrentVersion(target.version);
-        if (target.graph) {
-          try {
-            if (target.graph.schemaVersion === '1.0.0') {
-              setGraph(deserializeFromCanonical(target.graph));
-              return;
-            } else if (target.graph.nodes && target.graph.edges) {
-              setGraph(target.graph);
-              return;
-            }
-          } catch (err) {
-            console.error('Failed to parse workflow graph', err);
-          }
-        }
-      }
-    }
-
-    if (project?.workflows?.[0]?.graph) {
-      try {
-        const loaded = project.workflows[0].graph as any;
-        if (loaded.nodes && loaded.edges) {
-          if (loaded.schemaVersion === '1.0.0') {
-            setGraph(deserializeFromCanonical(loaded));
-          } else {
-            setGraph(loaded);
-          }
-          return;
-        }
-      } catch {
-        // fallback
-      }
-    }
-
-    try {
-      const savedLocal = localStorage.getItem(`quickgent_workflow_${projectId}`);
-      if (savedLocal) {
-        const parsed = JSON.parse(savedLocal);
-        if (parsed.nodes && parsed.edges) {
-          setGraph(parsed);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, [workflowsQuery.isLoading, workflows, project?.workflows, projectId]);
-
-  // Autosave Draft to LocalStorage with debounce
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
-      } catch {
-        // ignore
-      }
-    }, 800);
-    return () => clearTimeout(timer);
-  }, [graph, projectId]);
-
-  // Validation
-  const validation = useMemo(() => validateWorkflow(graph), [graph]);
-  const selectedNode = useMemo(
-    () => graph.nodes.find((n) => n.id === selectedNodeId) || null,
-    [graph.nodes, selectedNodeId],
-  );
-
   // Fit View
   const handleFitView = useCallback(() => {
     if (graph.nodes.length === 0 || !canvasRef.current) return;
@@ -345,6 +271,116 @@ export default function ProjectStudioPage() {
     });
     setZoom(newZoom);
   }, [graph.nodes]);
+
+  // Load Initial Workflow from Backend or LocalStorage (run once on mount/data ready)
+  useEffect(() => {
+    if (initialLoadedRef.current) return;
+    if (!projectId) return;
+    if (workflowsQuery.isLoading) return;
+
+    initialLoadedRef.current = true;
+
+    if (workflows.length > 0) {
+      // Prefer LIVE workflow, otherwise latest created workflow
+      const live = workflows.find((w) => w.isLive);
+      const target = live || workflows[0];
+      if (target) {
+        setCurrentVersion(target.version);
+        if (target.graph) {
+          try {
+            if (target.graph.schemaVersion === '1.0.0') {
+              const loaded = deserializeFromCanonical(target.graph);
+              setGraph(loaded);
+              setTimeout(() => handleFitView(), 60);
+              return;
+            } else if (target.graph.nodes && target.graph.edges) {
+              const loaded = {
+                ...target.graph,
+                nodes: autoLayoutNodes(target.graph.nodes, target.graph.edges),
+              };
+              setGraph(loaded);
+              setTimeout(() => handleFitView(), 60);
+              return;
+            }
+          } catch (err) {
+            console.error('Failed to parse workflow graph', err);
+          }
+        }
+      }
+    }
+
+    if (project?.workflows?.[0]?.graph) {
+      try {
+        const loaded = project.workflows[0].graph as any;
+        if (loaded.nodes && loaded.edges) {
+          if (loaded.schemaVersion === '1.0.0') {
+            const des = deserializeFromCanonical(loaded);
+            setGraph(des);
+            setTimeout(() => handleFitView(), 60);
+          } else {
+            const des = {
+              ...loaded,
+              nodes: autoLayoutNodes(loaded.nodes, loaded.edges),
+            };
+            setGraph(des);
+            setTimeout(() => handleFitView(), 60);
+          }
+          return;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    try {
+      const savedLocal = localStorage.getItem(`quickgent_workflow_${projectId}`);
+      if (savedLocal) {
+        const parsed = JSON.parse(savedLocal);
+        if (parsed.nodes && parsed.edges) {
+          setGraph({
+            ...parsed,
+            nodes: autoLayoutNodes(parsed.nodes, parsed.edges),
+          });
+          setTimeout(() => handleFitView(), 60);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [workflowsQuery.isLoading, workflows, project?.workflows, projectId]);
+
+  // Autosave Draft to LocalStorage with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(`quickgent_workflow_${projectId}`, JSON.stringify(graph));
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [graph, projectId]);
+
+  // Validation
+  const validation = useMemo(() => validateWorkflow(graph), [graph]);
+  const selectedNode = useMemo(
+    () => graph.nodes.find((n) => n.id === selectedNodeId) || null,
+    [graph.nodes, selectedNodeId],
+  );
+
+  // Auto-Layout Nodes Hierarchically
+  const handleAutoLayout = useCallback(() => {
+    updateGraphWithHistory((prev) => ({
+      ...prev,
+      nodes: autoLayoutNodes(prev.nodes, prev.edges, true),
+    }));
+    setTimeout(() => handleFitView(), 60);
+    setNotification({
+      message: 'Workflow layout auto-aligned successfully',
+      type: 'info',
+    });
+    setTimeout(() => setNotification(null), 2500);
+  }, [updateGraphWithHistory, handleFitView]);
 
   // Node Management Handlers
   const handleAddNode = (type: CoreNodeType, dropPos?: { x: number; y: number }) => {
@@ -480,8 +516,12 @@ export default function ProjectStudioPage() {
         if (wf.graph.schemaVersion === '1.0.0') {
           setGraph(deserializeFromCanonical(wf.graph));
         } else if (wf.graph.nodes && wf.graph.edges) {
-          setGraph(wf.graph);
+          setGraph({
+            ...wf.graph,
+            nodes: autoLayoutNodes(wf.graph.nodes, wf.graph.edges),
+          });
         }
+        setTimeout(() => handleFitView(), 60);
         setHistory([]);
         setFuture([]);
         setNotification({
@@ -1025,6 +1065,21 @@ export default function ProjectStudioPage() {
                 <span>Make Live</span>
               </button>
             )}
+
+          {/* Direct Live Agent Chat Button (if a live version exists) */}
+          {workflows.find((w) => w.isLive) && (
+            <Link
+              to={`/projects/${projectId}/workflows/live`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/60 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60 transition-all shadow-xs"
+              title="Open Live Agent Chat in a new tab"
+            >
+              <Bot className="size-3 text-emerald-400" />
+              <span>Live Chat</span>
+              <ExternalLink className="size-2.5 text-emerald-400/80" />
+            </Link>
+          )}
 
           {/* Actionable Validation Status Badge */}
           <button
@@ -1657,6 +1712,14 @@ export default function ProjectStudioPage() {
               title="Reset 100%"
             >
               <RefreshCw className="size-3" />
+            </button>
+            <button
+              type="button"
+              onClick={handleAutoLayout}
+              className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors"
+              title="Auto-align Layout"
+            >
+              <LayoutGrid className="size-3.5" />
             </button>
             <button
               type="button"

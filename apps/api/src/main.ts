@@ -19,6 +19,14 @@ async function bootstrap() {
   // Cookie parsing for HttpOnly JWT tokens
   app.use(cookieParser());
 
+  // Support both /api/... and direct /... endpoints seamlessly
+  app.use((req: any, _res: any, next: any) => {
+    if (req.url.startsWith('/api/')) {
+      req.url = req.url.replace(/^\/api/, '');
+    }
+    next();
+  });
+
   // Strict request validation
   app.useGlobalPipes(
     new ValidationPipe({

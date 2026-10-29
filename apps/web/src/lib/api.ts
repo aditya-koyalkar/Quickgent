@@ -188,6 +188,7 @@ export interface WorkflowItem {
   isLive: boolean;
   graph: any;
   projectId: string;
+  project?: { id: string; name: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -274,7 +275,98 @@ export const workflowsApi = {
     api.delete<{ success: boolean; message: string }>(
       `/projects/${projectId}/workflows/${version}`,
     ),
+
+  getLive: (projectId: string) =>
+    api.get<WorkflowItem>(`/projects/${projectId}/workflows/live`),
+
+  executeLive: (
+    projectId: string,
+    data: {
+      inputs?: Record<string, any>;
+      message?: string;
+      user_message?: string;
+      sessionId?: string;
+    },
+  ) =>
+    api.post<LiveWorkflowExecutionResult>(
+      `/projects/${projectId}/workflows/live/run`,
+      data,
+    ),
+
+  chatLive: (
+    projectId: string,
+    data: {
+      message: string;
+      conversationId?: string;
+      sessionId?: string;
+    },
+  ) =>
+    api.post<LiveWorkflowChatResult>(
+      `/projects/${projectId}/workflows/live/chat`,
+      data,
+    ),
+
+  getLiveConversation: (projectId: string, conversationId: string) =>
+    api.get<{
+      id: string;
+      name: string;
+      projectId: string;
+      workflowId?: string;
+      workflowVersion?: string;
+      messages: MessageItem[];
+    }>(`/projects/${projectId}/workflows/live/conversations/${conversationId}`),
 };
+
+export interface NodeExecutionTraceItem {
+  node_id: string;
+  node_name: string;
+  node_type: string;
+  status: 'success' | 'failed';
+  input_data: Record<string, any>;
+  output_data: Record<string, any>;
+  selected_route?: string;
+  tool_calls?: Array<{
+    id: string;
+    tool_name: string;
+    arguments: Record<string, any>;
+    result: any;
+    duration_ms: number;
+    status: string;
+  }>;
+  duration_ms: number;
+  error?: string;
+  started_at: string;
+  finished_at: string;
+}
+
+export interface LiveWorkflowExecutionResult {
+  executionId: string;
+  workflowVersion: string;
+  status: 'completed' | 'failed';
+  response: string;
+  outputs: Record<string, any>;
+  state: Record<string, any>;
+  stepTraces: NodeExecutionTraceItem[];
+  totalDurationMs: number;
+  totalTokens: number;
+}
+
+export interface LiveWorkflowChatResult {
+  conversationId: string;
+  userMessage: MessageItem;
+  assistantMessage: MessageItem;
+  reply: string;
+  executionId: string;
+  stepTraces: NodeExecutionTraceItem[];
+  totalDurationMs: number;
+  totalTokens: number;
+  workflow: {
+    id: string;
+    version: string;
+    note?: string | null;
+    project?: { id: string; name: string };
+  };
+}
 
 // ── Conversations & Copilot Chat API functions ──────────────────────
 export interface MessageItem {

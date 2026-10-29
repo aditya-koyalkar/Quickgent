@@ -54,6 +54,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 
 import DashboardPage from './pages/DashboardPage';
 import ProjectStudioPage from './pages/ProjectStudioPage';
+import LiveWorkflowChatPage from './pages/LiveWorkflowChatPage';
 
 // ── App ─────────────────────────────────────────────────────────────
 function AppRoutes() {
@@ -91,6 +92,18 @@ function AppRoutes() {
             <ProjectStudioPage />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/projects/:id/live"
+        element={<LiveWorkflowChatPage />}
+      />
+      <Route
+        path="/projects/:id/workflows/live"
+        element={<LiveWorkflowChatPage />}
+      />
+      <Route
+        path="/projects/:id/workflows/:version"
+        element={<LiveWorkflowChatPage />}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

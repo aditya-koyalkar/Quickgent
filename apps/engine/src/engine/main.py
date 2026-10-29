@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .logging_config import setup_logging
 from .copilot import router as copilot_router
+from .workflow import router as workflow_router
 
 # Initialize centralized logging
 logger = setup_logging()
@@ -42,3 +43,4 @@ def health():
     return {"status": "ok", "service": "quickgent-engine"}
 
 app.include_router(copilot_router, prefix="/copilot", tags=["Copilot"])
+app.include_router(workflow_router, prefix="/workflow", tags=["Workflow"])

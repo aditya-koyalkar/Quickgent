@@ -15,12 +15,63 @@ import {
   CreateWorkflowDto,
   UpdateWorkflowDto,
   GetWorkflowsQueryDto,
+  ExecuteWorkflowDto,
+  LiveWorkflowChatDto,
 } from './dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 
 @Controller('projects/:projectId/workflows')
 export class WorkflowsController {
   constructor(private readonly workflowsService: WorkflowsService) {}
+
+  @Get('live')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  findLive(@Param('projectId') projectId: string) {
+    return this.workflowsService.findLive(projectId);
+  }
+
+  @Post('live')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  executeLiveDirect(
+    @Param('projectId') projectId: string,
+    @Body() dto: ExecuteWorkflowDto,
+  ) {
+    return this.workflowsService.executeLive(projectId, dto);
+  }
+
+  @Post('live/run')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  executeLive(
+    @Param('projectId') projectId: string,
+    @Body() dto: ExecuteWorkflowDto,
+  ) {
+    return this.workflowsService.executeLive(projectId, dto);
+  }
+
+  @Post('live/chat')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  chatLive(
+    @CurrentUser('sub') userId: string,
+    @Param('projectId') projectId: string,
+    @Body() dto: LiveWorkflowChatDto,
+  ) {
+    return this.workflowsService.chatLive(projectId, dto, userId);
+  }
+
+  @Get('live/conversations/:conversationId')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  getLiveConversation(
+    @Param('projectId') projectId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.workflowsService.getLiveConversation(projectId, conversationId);
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

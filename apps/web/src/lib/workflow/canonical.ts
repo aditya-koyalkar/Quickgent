@@ -120,10 +120,151 @@ export function serializeToCanonical(graph: WorkflowGraph): CanonicalWorkflow {
 }
 
 /**
+ * Automatically calculates a clean hierarchical top-to-bottom layout for workflow nodes.
+ * Triggers when positions are missing, identical (e.g. all stacked at (200, 200)), or overlapping.
+ */
+export function autoLayoutNodes(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  force: boolean = false
+): WorkflowNode[] {
+  if (nodes.length <= 1) return nodes;
+
+  if (!force) {
+    const first = nodes[0].position || { x: 200, y: 200 };
+    const allIdentical = nodes.every(
+      (n) =>
+        !n.position ||
+        (Math.abs(n.position.x - first.x) < 5 && Math.abs(n.position.y - first.y) < 5)
+    );
+    const anyInvalid = nodes.some(
+      (n) =>
+        !n.position ||
+        typeof n.position.x !== 'number' ||
+        isNaN(n.position.x) ||
+        typeof n.position.y !== 'number' ||
+        isNaN(n.position.y)
+    );
+
+    // Check if any two nodes have the exact same position
+    const posSet = new Set<string>();
+    let hasOverlaps = false;
+    for (const n of nodes) {
+      if (!n.position) {
+        hasOverlaps = true;
+        break;
+      }
+      const key = `${Math.round(n.position.x)},${Math.round(n.position.y)}`;
+      if (posSet.has(key)) {
+        hasOverlaps = true;
+        break;
+      }
+      posSet.add(key);
+    }
+
+    if (!allIdentical && !anyInvalid && !hasOverlaps) {
+      return nodes;
+    }
+  }
+
+  // 1. Build adjacency list & in-degree map
+  const outgoing: Record<string, string[]> = {};
+  const inDegree: Record<string, number> = {};
+  nodes.forEach((n) => {
+    outgoing[n.id] = [];
+    inDegree[n.id] = 0;
+  });
+
+  edges.forEach((e) => {
+    if (outgoing[e.source] && e.target in inDegree) {
+      outgoing[e.source].push(e.target);
+      inDegree[e.target] = (inDegree[e.target] || 0) + 1;
+    }
+  });
+
+  // 2. Identify hierarchical levels using topological BFS
+  const levels: Record<string, number> = {};
+  const queue: string[] = [];
+
+  const startNode = nodes.find((n) => n.type === 'start');
+  if (startNode) {
+    levels[startNode.id] = 0;
+    queue.push(startNode.id);
+  }
+
+  nodes.forEach((n) => {
+    if (inDegree[n.id] === 0 && !queue.includes(n.id)) {
+      levels[n.id] = 0;
+      queue.push(n.id);
+    }
+  });
+
+  if (queue.length === 0 && nodes.length > 0) {
+    levels[nodes[0].id] = 0;
+    queue.push(nodes[0].id);
+  }
+
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    const currLevel = levels[curr] ?? 0;
+    for (const neighbor of outgoing[curr] || []) {
+      const nextLevel = currLevel + 1;
+      if (levels[neighbor] === undefined || levels[neighbor] < nextLevel) {
+        levels[neighbor] = nextLevel;
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  // Ensure all orphaned or unreached nodes have a level
+  let currentMax = Math.max(0, ...Object.values(levels));
+  nodes.forEach((n) => {
+    if (levels[n.id] === undefined) {
+      currentMax += 1;
+      levels[n.id] = currentMax;
+    }
+  });
+
+  // 3. Group nodes by level
+  const levelGroups: Record<number, WorkflowNode[]> = {};
+  nodes.forEach((n) => {
+    const lvl = levels[n.id] || 0;
+    if (!levelGroups[lvl]) levelGroups[lvl] = [];
+    levelGroups[lvl].push(n);
+  });
+
+  const nodeMap = new Map<string, WorkflowNode>();
+  const Y_START = 60;
+  const Y_GAP = 180;
+  const X_GAP = 300;
+  const CANVAS_CENTER_X = 420;
+
+  Object.entries(levelGroups).forEach(([lvlStr, group]) => {
+    const lvl = Number(lvlStr);
+    const count = group.length;
+    const startX = CANVAS_CENTER_X - ((count - 1) * X_GAP) / 2;
+    const y = Y_START + lvl * Y_GAP;
+
+    group.forEach((node, idx) => {
+      nodeMap.set(node.id, {
+        ...node,
+        position: {
+          x: Math.round(startX + idx * X_GAP),
+          y,
+        },
+      });
+    });
+  });
+
+  return nodes.map((n) => nodeMap.get(n.id) || n);
+}
+
+/**
  * Converts a CanonicalWorkflow JSON object into the visual canvas WorkflowGraph.
  */
 export function deserializeFromCanonical(canonical: CanonicalWorkflow): WorkflowGraph {
-  const nodes: WorkflowNode[] = canonical.nodes.map((cNode) => {
+  const rawNodes = canonical.nodes || [];
+  const nodes: WorkflowNode[] = rawNodes.map((cNode: any) => {
     const rawType = cNode.type as string;
     // Map legacy types to core types if needed
     let coreType: CoreNodeType = 'agent';
@@ -138,26 +279,28 @@ export function deserializeFromCanonical(canonical: CanonicalWorkflow): Workflow
     }
 
     const reg = NODE_REGISTRY[coreType] || NODE_REGISTRY.agent;
-    const config = { ...reg.defaultConfig, ...(cNode.config || {}) };
+    const config = { ...reg.defaultConfig, ...(cNode.config || cNode.data?.config || {}) };
+    const label = cNode.name || cNode.title || cNode.data?.label || reg.label;
+    const description = cNode.description || cNode.data?.description || reg.description;
 
     return {
       id: cNode.id,
       type: coreType,
-      title: cNode.name || reg.label,
+      title: label,
       position: {
-        x: cNode.position?.x ?? 200,
-        y: cNode.position?.y ?? 200,
+        x: cNode.position?.x ?? cNode.data?.position?.x ?? 200,
+        y: cNode.position?.y ?? cNode.data?.position?.y ?? 200,
       },
       data: {
-        label: cNode.name || reg.label,
+        label,
         sublabel: reg.sublabel,
-        description: cNode.description || reg.description,
+        description,
         config,
       },
     };
   });
 
-  const edges: WorkflowEdge[] = canonical.edges.map((cEdge) => ({
+  const edges: WorkflowEdge[] = (canonical.edges || []).map((cEdge) => ({
     id: cEdge.id,
     source: cEdge.source,
     target: cEdge.target,
@@ -166,13 +309,16 @@ export function deserializeFromCanonical(canonical: CanonicalWorkflow): Workflow
     label: cEdge.label,
   }));
 
+  // Auto-layout nodes if positions are stacked, identical, or invalid
+  const laidOutNodes = autoLayoutNodes(nodes, edges);
+
   return {
     id: canonical.workflow?.id,
     name: canonical.workflow?.name || 'Imported Workflow',
     version: canonical.workflow?.version || '1.0.0',
     description: canonical.workflow?.description,
     status: 'DRAFT',
-    nodes,
+    nodes: laidOutNodes,
     edges,
   };
 }
