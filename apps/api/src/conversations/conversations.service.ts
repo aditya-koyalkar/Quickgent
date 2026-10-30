@@ -356,6 +356,8 @@ export class ConversationsService {
       explanation: string;
       architecture_highlights: string[];
       workflow: any;
+      needs_clarification?: boolean;
+      clarification_questions?: string[];
       metadata?: any;
     };
 
@@ -412,11 +414,16 @@ export class ConversationsService {
         role: 'ASSISTANT',
         content: {
           text: engineResult.explanation,
-          suggestedWorkflow: engineResult.workflow,
+          suggestedWorkflow: engineResult.workflow || undefined,
           highlights: engineResult.architecture_highlights || [],
+          needsClarification: engineResult.needs_clarification || false,
+          clarificationQuestions: engineResult.clarification_questions || [],
         },
-        metadata: engineResult.metadata || {},
-        model: engineResult.metadata?.model || 'gemini-1.5-flash',
+        metadata: {
+          ...(engineResult.metadata || {}),
+          needsClarification: engineResult.needs_clarification || false,
+        },
+        model: engineResult.metadata?.model || 'gemini-3.8-flash',
       },
     });
 
@@ -440,8 +447,10 @@ export class ConversationsService {
     return {
       userMessage,
       assistantMessage,
-      suggestedWorkflow: engineResult.workflow,
+      suggestedWorkflow: engineResult.workflow || null,
       highlights: engineResult.architecture_highlights || [],
+      needsClarification: engineResult.needs_clarification || false,
+      clarificationQuestions: engineResult.clarification_questions || [],
     };
   }
 }

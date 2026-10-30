@@ -33,6 +33,7 @@ import {
   Bot,
   ExternalLink,
   LayoutGrid,
+  HelpCircle,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
 import {
@@ -1940,6 +1941,10 @@ export default function ProjectStudioPage() {
                     typeof msg.content === 'object' && msg.content !== null
                       ? msg.content.highlights
                       : undefined;
+                  const clarificationQuestions =
+                    typeof msg.content === 'object' && msg.content !== null
+                      ? msg.content.clarificationQuestions
+                      : undefined;
 
                   return (
                     <div
@@ -1974,6 +1979,20 @@ export default function ProjectStudioPage() {
                             <ul className="mt-1 space-y-1 list-disc list-inside text-[11px] text-neutral-300">
                               {highlights.map((h, i) => (
                                 <li key={i}>{h}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {clarificationQuestions && Array.isArray(clarificationQuestions) && clarificationQuestions.length > 0 && (
+                          <div className="mt-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1.5 text-left">
+                            <div className="flex items-center gap-1.5 text-amber-400 font-semibold text-[11px]">
+                              <HelpCircle className="size-3.5 shrink-0" />
+                              <span>Required Information to Build Workflow:</span>
+                            </div>
+                            <ul className="space-y-1 text-[11px] text-amber-100/90 list-disc list-inside pl-1">
+                              {clarificationQuestions.map((q: string, i: number) => (
+                                <li key={i}>{q}</li>
                               ))}
                             </ul>
                           </div>

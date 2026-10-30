@@ -377,6 +377,8 @@ export interface MessageItem {
     text: string;
     suggestedWorkflow?: any;
     highlights?: string[];
+    needsClarification?: boolean;
+    clarificationQuestions?: string[];
   };
   metadata?: any;
   model?: string;
@@ -417,6 +419,8 @@ export interface SendMessageResponse {
   assistantMessage: MessageItem;
   suggestedWorkflow?: any;
   highlights?: string[];
+  needsClarification?: boolean;
+  clarificationQuestions?: string[];
 }
 
 export const conversationsApi = {

@@ -42,15 +42,23 @@ class CanonicalWorkflow(BaseModel):
 class CopilotOutputSchema(BaseModel):
     explanation: str = Field(
         ...,
-        description="Detailed, professional markdown explanation explaining the architectural design, each node's role, and how it addresses the conversation and user request."
+        description="Detailed, professional markdown explanation explaining the architectural design, each node's role, and how it addresses the conversation and user request, or the clarification questions if requirements are incomplete."
     )
     architecture_highlights: list[str] = Field(
-        ...,
-        description="3 to 5 bullet points summarizing key architectural decisions, routing paths, or capabilities added."
+        default_factory=list,
+        description="Bullet points summarizing key architectural decisions, routing paths, or capabilities added. Leave empty if asking clarification questions."
     )
-    workflow: CanonicalWorkflow = Field(
-        ...,
-        description="Strictly valid Canonical Workflow v1.0.0 DAG structure with all nodes and edges."
+    needs_clarification: bool = Field(
+        default=False,
+        description="Set to true if essential requirements, business rules, API details, tools, or escalation parameters are missing to build a reliable workflow."
+    )
+    clarification_questions: list[str] | None = Field(
+        default=None,
+        description="Clear, specific questions for the user if needs_clarification is true. Explain what is needed and why."
+    )
+    workflow: CanonicalWorkflow | None = Field(
+        default=None,
+        description="Strictly valid Canonical Workflow v1.0.0 DAG structure. Set to null if needs_clarification is true and more information is required before constructing the graph."
     )
 
 
@@ -63,13 +71,18 @@ class CopilotGenerateRequest(BaseModel):
 
 class CopilotGenerateResponse(BaseModel):
     explanation: str
-    architecture_highlights: list[str]
-    workflow: dict[str, Any]
+    architecture_highlights: list[str] = Field(default_factory=list)
+    workflow: dict[str, Any] | None = None
+    needs_clarification: bool = False
+    clarification_questions: list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def validate_canonical_graph(wf: CanonicalWorkflow) -> None:
+def validate_canonical_graph(wf: CanonicalWorkflow | None) -> None:
     """Validates basic DAG integrity before returning to client."""
+    if wf is None:
+        return
+
     node_ids = {n.id for n in wf.nodes}
     if len(node_ids) != len(wf.nodes):
         raise ValueError("Workflow contains duplicate node IDs.")
