@@ -9,7 +9,6 @@ import {
   RotateCcw,
   Layers,
   ChevronRight,
-  ChevronDown,
   Activity,
   Bot,
   User,
@@ -22,7 +21,7 @@ import { useLiveWorkflow, type ChatMessage } from '../hooks/useLiveWorkflow';
 
 export default function LiveWorkflowChatPage() {
   const { id } = useParams<{ id: string }>();
-  const projectId = id || '';
+  const targetId = id || '';
 
   const {
     liveWorkflow,
@@ -32,7 +31,7 @@ export default function LiveWorkflowChatPage() {
     sendMessage,
     isSending,
     resetSession,
-  } = useLiveWorkflow(projectId);
+  } = useLiveWorkflow(targetId);
 
   const [inputMessage, setInputMessage] = useState('');
   const [activeTraceMessage, setActiveTraceMessage] = useState<ChatMessage | null>(null);
@@ -117,11 +116,11 @@ export default function LiveWorkflowChatPage() {
           </div>
           <div className="pt-2 flex justify-center gap-3">
             <Link
-              to={`/projects/${projectId}`}
+              to={liveWorkflow?.projectId ? `/projects/${liveWorkflow.projectId}` : '/dashboard'}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-500 transition-colors shadow-md"
             >
               <ArrowLeft className="size-4" />
-              Open Project Studio
+              Return to Dashboard
             </Link>
           </div>
         </div>
@@ -131,6 +130,7 @@ export default function LiveWorkflowChatPage() {
 
   const projectName = liveWorkflow.project?.name || 'Project Agent';
   const workflowVersion = liveWorkflow.version;
+  const studioUrl = liveWorkflow.projectId ? `/projects/${liveWorkflow.projectId}` : '/dashboard';
 
   return (
     <div className="flex h-screen w-screen flex-col bg-neutral-950 text-neutral-200 overflow-hidden select-text">
@@ -138,7 +138,7 @@ export default function LiveWorkflowChatPage() {
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800/80 bg-neutral-900/50 px-4 backdrop-blur-md z-30">
         <div className="flex items-center gap-3">
           <Link
-            to={`/projects/${projectId}`}
+            to={studioUrl}
             className="flex size-8 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
             title="Return to Studio Canvas"
           >
@@ -168,6 +168,7 @@ export default function LiveWorkflowChatPage() {
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-2">
+          {/* Inspect Graph Architecture */}
           <button
             type="button"
             onClick={() => setIsGraphDrawerOpen(true)}
@@ -178,19 +179,20 @@ export default function LiveWorkflowChatPage() {
             <span className="hidden sm:inline">Inspect Graph</span>
           </button>
 
+          {/* Start New Chat Session */}
           <button
             type="button"
             onClick={resetSession}
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900/80 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-            title="Start new conversation session"
+            title="Start fresh conversation"
           >
             <RotateCcw className="size-3.5" />
-            <span className="hidden sm:inline">New Session</span>
+            <span className="hidden sm:inline">New Chat</span>
           </button>
         </div>
       </header>
 
-      {/* ── Main Chat Canvas Area ─────────────────────────────────────── */}
+      {/* ── Main Customer Chat Canvas ─────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden relative">
         <main className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Messages Scroll Area */}
@@ -206,8 +208,8 @@ export default function LiveWorkflowChatPage() {
                     Live Workflow Agent Online
                   </h3>
                   <p className="text-xs text-neutral-300 leading-relaxed">
-                    You are directly communicating with the production release of <span className="font-semibold text-white">{projectName}</span> (version <span className="font-mono text-emerald-400">v{workflowVersion}</span>).
-                    Every message triggers the actual workflow graph JSON in real-time, executing conditions, LLM prompts, and autonomous agent tools.
+                    You are directly communicating with <span className="font-semibold text-white">{projectName}</span> (version <span className="font-mono text-emerald-400">v{workflowVersion}</span>).
+                    Every message triggers the actual live workflow pipeline in real-time, executing conditions, LLM prompts, and autonomous agent tools.
                   </p>
                 </div>
               </div>
@@ -249,66 +251,82 @@ export default function LiveWorkflowChatPage() {
                     }`}
                   >
                     {!isUser && (
-                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-emerald-950 border border-emerald-700/60 text-emerald-400 mt-0.5">
-                        <Bot className="size-3.5" />
+                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-emerald-950 border border-emerald-700/60 text-emerald-400 shadow-sm mt-0.5">
+                        <Bot className="size-4" />
                       </div>
                     )}
 
-                    <div className={`space-y-1.5 max-w-[85%] sm:max-w-[78%]`}>
+                    <div className={`space-y-1 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
                       <div
-                        className={`rounded-2xl px-4 py-3 shadow-md ${
+                        className={`rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-sm ${
                           isUser
-                            ? 'bg-brand-600 text-white rounded-br-xs'
+                            ? 'bg-brand-600 text-white rounded-br-none'
                             : msg.isError
-                            ? 'bg-red-950/40 border border-red-800/60 text-red-200 rounded-bl-xs'
-                            : 'bg-neutral-900/80 border border-neutral-800 text-neutral-200 rounded-bl-xs'
+                            ? 'bg-rose-950/50 border border-rose-800/60 text-rose-200 rounded-bl-none'
+                            : 'bg-neutral-900/90 border border-neutral-800 text-neutral-200 rounded-bl-none'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                        <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                        {/* Execution Metas and Trace Pill */}
+                        {!isUser && !msg.isError && (
+                          <div className="mt-2.5 pt-2 border-t border-neutral-800/80 flex flex-wrap items-center gap-2 text-[10px] font-mono text-neutral-400">
+                            {msg.durationMs !== undefined && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="size-2.5 text-neutral-400" />
+                                {Math.round(msg.durationMs)}ms
+                              </span>
+                            )}
+
+                            {msg.totalTokens !== undefined && msg.totalTokens > 0 && (
+                              <span>{msg.totalTokens} tokens</span>
+                            )}
+
+                            {msg.stepTraces && msg.stepTraces.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveTraceMessage(msg)}
+                                className="inline-flex items-center gap-1 rounded bg-neutral-800 hover:bg-neutral-700 px-1.5 py-0.5 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                              >
+                                <Activity className="size-2.5 text-brand-400" />
+                                <span>{msg.stepTraces.length} steps executed</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
 
-                      {/* Assistant execution metadata & trace link */}
-                      {!isUser && !msg.isError && msg.stepTraces && msg.stepTraces.length > 0 && (
-                        <div className="flex items-center gap-2 px-1 text-[10px] text-neutral-500 font-mono">
-                          {msg.durationMs !== undefined && (
-                            <span className="flex items-center gap-1">
-                              <Clock className="size-3" />
-                              {Math.round(msg.durationMs)}ms
-                            </span>
-                          )}
-                          <span>•</span>
-                          <span>{msg.stepTraces.length} nodes executed</span>
-
-                          <button
-                            type="button"
-                            onClick={() => setActiveTraceMessage(msg)}
-                            className="ml-auto inline-flex items-center gap-1 text-brand-400 hover:text-brand-300 font-sans font-medium transition-colors cursor-pointer"
-                          >
-                            <Activity className="size-3" />
-                            View Run Trace
-                          </button>
-                        </div>
-                      )}
+                      <span className="text-[10px] text-neutral-500 px-1">
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
                     </div>
 
                     {isUser && (
-                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-brand-900/50 border border-brand-700/60 text-brand-300 mt-0.5">
-                        <User className="size-3.5" />
+                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-300 border border-neutral-700 mt-0.5">
+                        <User className="size-4" />
                       </div>
                     )}
                   </div>
                 );
               })}
 
-              {/* Streaming / Running Indicator */}
+              {/* Thinking / Executing Indicator */}
               {isSending && (
-                <div className="flex items-center gap-3 text-xs text-neutral-400 animate-in fade-in">
-                  <div className="flex size-7 items-center justify-center rounded-lg bg-emerald-950 border border-emerald-700/60 text-emerald-400">
-                    <Bot className="size-3.5" />
+                <div className="flex gap-3 text-xs justify-start animate-in fade-in">
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-emerald-950 border border-emerald-700/60 text-emerald-400 animate-pulse">
+                    <Bot className="size-4" />
                   </div>
-                  <div className="rounded-2xl rounded-bl-xs bg-neutral-900/80 border border-neutral-800 px-4 py-3 flex items-center gap-2.5">
-                    <span className="size-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span className="text-neutral-300">Agent is executing workflow graph nodes...</span>
+                  <div className="rounded-2xl rounded-bl-none border border-neutral-800 bg-neutral-900/90 px-4 py-3 space-y-1.5 shadow-sm">
+                    <div className="flex items-center gap-2 text-xs text-neutral-300 font-medium">
+                      <Activity className="size-3.5 animate-spin text-emerald-400" />
+                      <span>Executing live workflow graph...</span>
+                    </div>
+                    <p className="text-[10px] text-neutral-500">
+                      Evaluating agent routes, calling tools, and querying models
+                    </p>
                   </div>
                 </div>
               )}
@@ -317,89 +335,100 @@ export default function LiveWorkflowChatPage() {
             </div>
           </div>
 
-          {/* Sticky Bottom Input Bar */}
-          <div className="border-t border-neutral-800/80 bg-neutral-900/60 p-3 sm:p-4 backdrop-blur-md">
-            <div className="mx-auto max-w-2xl">
-              <form onSubmit={handleSend} className="relative flex items-end gap-2">
+          {/* ── Chat Input Footer ────────────────────────────────────────── */}
+          <footer className="border-t border-neutral-800/80 bg-neutral-900/40 p-4 backdrop-blur-md">
+            <form onSubmit={handleSend} className="mx-auto max-w-2xl">
+              <div className="relative rounded-2xl border border-neutral-800 bg-neutral-900/90 p-2 shadow-xl focus-within:border-brand-500/50 transition-colors">
                 <textarea
                   ref={inputRef}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={`Message ${projectName} (v${workflowVersion})...`}
+                  placeholder="Type a message to run this agent workflow..."
+                  disabled={isSending}
                   rows={2}
-                  className="w-full resize-none rounded-xl border border-neutral-800 bg-black/60 p-3 text-xs text-white placeholder-neutral-500 focus:border-brand-500 focus:outline-none transition-colors"
+                  className="w-full resize-none bg-transparent px-2 text-xs text-white placeholder-neutral-500 focus:outline-none disabled:opacity-50"
                 />
 
-                <button
-                  type="submit"
-                  disabled={!inputMessage.trim() || isSending}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40 transition-all shadow-md cursor-pointer disabled:cursor-not-allowed mb-1"
-                  title="Send message (Enter)"
-                >
-                  <Send className="size-4" />
-                </button>
-              </form>
-              <div className="flex items-center justify-between mt-2 px-1 text-[10px] text-neutral-500">
-                <span>Press <kbd className="font-mono bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800 text-neutral-400">Enter</kbd> to send, <kbd className="font-mono bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800 text-neutral-400">Shift+Enter</kbd> for new line</span>
-                <span className="font-mono text-emerald-400/80 flex items-center gap-1">
-                  <span className="size-1 rounded-full bg-emerald-400" />
-                  Live Workflow Engine
-                </span>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-neutral-500 font-mono">
+                    Press <kbd className="rounded bg-neutral-800 px-1 py-0.5">Enter</kbd> to run
+                  </span>
+
+                  <button
+                    type="submit"
+                    disabled={!inputMessage.trim() || isSending}
+                    className="flex size-8 items-center justify-center rounded-xl bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40 disabled:hover:bg-brand-600 transition-all cursor-pointer shadow-md"
+                  >
+                    <Send className="size-3.5" />
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
+            </form>
+          </footer>
         </main>
 
-        {/* ── Side Drawer: Execution Trace Modal / Sheet ─────────────────── */}
+        {/* ── Side Drawer: Detailed Node Execution Trace ───────────────────── */}
         {activeTraceMessage && (
           <aside className="w-80 sm:w-96 border-l border-neutral-800 bg-neutral-950 flex flex-col z-40 animate-in slide-in-from-right duration-200">
             <div className="flex h-14 items-center justify-between border-b border-neutral-800 px-4">
               <div className="flex items-center gap-2">
-                <Activity className="size-4 text-brand-400" />
-                <div>
-                  <h3 className="text-xs font-semibold text-white">Execution Trace</h3>
-                  <p className="text-[10px] font-mono text-neutral-400">
-                    {activeTraceMessage.executionId || 'Run audit logs'}
-                  </p>
-                </div>
+                <Activity className="size-4 text-emerald-400" />
+                <h3 className="text-xs font-semibold text-white">Execution Trace Inspector</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveTraceMessage(null)}
-                className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors"
+                className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="size-4" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-3 space-y-1 text-xs">
+                <div className="font-semibold text-white flex items-center justify-between">
+                  <span>Run Execution</span>
+                  <span className="font-mono text-emerald-400 text-[10px]">
+                    {Math.round(activeTraceMessage.durationMs || 0)}ms
+                  </span>
+                </div>
+                <div className="text-[10px] font-mono text-neutral-400 truncate">
+                  ID: {activeTraceMessage.executionId}
+                </div>
+                <div className="text-[10px] font-mono text-neutral-400">
+                  Version: v{workflowVersion}
+                </div>
+              </div>
+
               {activeTraceMessage.stepTraces?.map((step, idx) => {
-                const isExpanded = Boolean(expandedTraceNodes[step.node_id]);
+                const isExpanded = expandedTraceNodes[step.node_id];
                 return (
                   <div
                     key={step.node_id || idx}
-                    className="rounded-xl border border-neutral-800/90 bg-neutral-900/40 p-3 space-y-2 text-xs"
+                    className="rounded-xl border border-neutral-800/80 bg-neutral-900/40 p-3 space-y-2 text-xs"
                   >
                     <button
                       type="button"
                       onClick={() => toggleNodeExpand(step.node_id)}
                       className="w-full flex items-center justify-between text-left cursor-pointer"
                     >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-3.5 text-emerald-400" />
-                        <span className="font-semibold text-white">{step.node_name}</span>
-                        <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[9px] font-mono text-neutral-400 uppercase">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className="size-3.5 text-emerald-400 shrink-0" />
+                        <span className="font-medium text-white truncate">
+                          {idx + 1}. {step.node_name}
+                        </span>
+                        <span className="rounded bg-neutral-800 px-1 py-0.2 text-[9px] font-mono text-neutral-400 uppercase">
                           {step.node_type}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-mono">
-                        <span>{Math.round(step.duration_ms)}ms</span>
-                        {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                      </div>
+                      <ChevronRight
+                        className={`size-3.5 text-neutral-400 transition-transform ${
+                          isExpanded ? 'rotate-90' : ''
+                        }`}
+                      />
                     </button>
 
-                    {/* Collapsible Node Details */}
                     {isExpanded && (
                       <div className="pt-2 border-t border-neutral-800/60 space-y-2 text-[11px] animate-in fade-in">
                         {step.selected_route && (
@@ -500,7 +529,7 @@ export default function LiveWorkflowChatPage() {
 
               <div className="pt-2 border-t border-neutral-800">
                 <Link
-                  to={`/projects/${projectId}`}
+                  to={studioUrl}
                   className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors"
                 >
                   <ExternalLink className="size-3.5" />

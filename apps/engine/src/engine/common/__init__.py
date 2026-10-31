@@ -8,6 +8,12 @@ from .llm import (
     get_llm,
     invoke_llm_with_fallback,
 )
+from .persistence import (
+    EnginePersister,
+    get_persister,
+    init_persister,
+    close_persister,
+)
 
 __all__ = [
     "DEFAULT_PRIMARY_MODEL",
@@ -15,5 +21,8 @@ __all__ = [
     "resolve_candidate_models",
     "get_llm",
     "invoke_llm_with_fallback",
+    "EnginePersister",
+    "get_persister",
+    "init_persister",
+    "close_persister",
 ]
-

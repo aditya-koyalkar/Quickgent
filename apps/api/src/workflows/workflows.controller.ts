@@ -63,6 +63,20 @@ export class WorkflowsController {
     return this.workflowsService.chatLive(projectId, dto, userId);
   }
 
+  @Get('live/conversations')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  listLiveConversations(@Param('projectId') projectId: string) {
+    return this.workflowsService.listLiveConversations(projectId);
+  }
+
+  @Get('live/sessions')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  listLiveSessions(@Param('projectId') projectId: string) {
+    return this.workflowsService.listLiveConversations(projectId);
+  }
+
   @Get('live/conversations/:conversationId')
   @Public()
   @HttpCode(HttpStatus.OK)

@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useState, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   workflowsApi,
   type WorkflowItem,
   type LiveWorkflowChatResult,
   type NodeExecutionTraceItem,
+  type ConversationItem,
 } from '../lib/api';
 
 export interface ChatMessage {
@@ -19,34 +20,102 @@ export interface ChatMessage {
   isError?: boolean;
 }
 
-export function useLiveWorkflow(projectId: string) {
-  const [conversationId, setConversationId] = useState<string | null>(null);
+export function useLiveWorkflow(idOrProjectId: string, initialSessionId?: string | null) {
+  const queryClient = useQueryClient();
+
+  // Frontend-generated session ID (UUID v4) for multi-turn persistence
+  const [sessionId, setSessionId] = useState<string>(() => {
+    return initialSessionId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sess_${Date.now()}`);
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedTrace, setSelectedTrace] = useState<NodeExecutionTraceItem[] | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
 
-  // 1. Fetch the live workflow
+  // 1. Fetch the live workflow configuration by dynamic workflow ID or project ID
   const {
     data: liveWorkflow,
     isLoading: isWorkflowLoading,
     error: workflowError,
     refetch: refetchWorkflow,
   } = useQuery<WorkflowItem>({
-    queryKey: ['live-workflow', projectId],
-    queryFn: () => workflowsApi.getLive(projectId),
-    enabled: Boolean(projectId),
+    queryKey: ['live-workflow', idOrProjectId],
+    queryFn: () => workflowsApi.getLiveById(idOrProjectId),
+    enabled: Boolean(idOrProjectId),
     retry: 1,
   });
 
-  // 2. Chat mutation
+  const resolvedProjectId = liveWorkflow?.projectId || idOrProjectId;
+
+  // 2. Fetch all sessions for this project (including workflow version & messages count)
+  const {
+    data: sessions = [],
+    isLoading: isSessionsLoading,
+    refetch: refetchSessions,
+  } = useQuery<ConversationItem[]>({
+    queryKey: ['live-sessions', resolvedProjectId],
+    queryFn: () => workflowsApi.listLiveConversations(resolvedProjectId),
+    enabled: Boolean(resolvedProjectId),
+    staleTime: 5000,
+  });
+
+  // 3. Load full message history of an existing session
+  const selectSession = useCallback(
+    async (targetSessionId: string) => {
+      if (!targetSessionId || !resolvedProjectId) return;
+      setSessionId(targetSessionId);
+      setIsLoadingSession(true);
+      try {
+        const conv = await workflowsApi.getLiveConversation(resolvedProjectId, targetSessionId);
+        if (conv && conv.messages) {
+          const loadedMsgs: ChatMessage[] = conv.messages.map((m: any) => {
+            const content = m.content as any;
+            const text =
+              typeof content === 'string'
+                ? content
+                : content?.text || content?.reply || JSON.stringify(content);
+            const meta = (m.metadata || {}) as any;
+            return {
+              id: m.id,
+              role: (m.role || '').toLowerCase() === 'user' ? 'user' : 'assistant',
+              text,
+              timestamp: m.createdAt,
+              executionId: meta?.executionId,
+              stepTraces: meta?.stepTraces,
+              durationMs: meta?.durationMs,
+              totalTokens: m.inputTokens || meta?.totalTokens,
+            };
+          });
+          setMessages(loadedMsgs);
+          const lastWithTrace = [...loadedMsgs].reverse().find((m) => m.stepTraces?.length);
+          setSelectedTrace(lastWithTrace?.stepTraces || null);
+        }
+      } catch (err) {
+        console.error('Failed to load session history:', err);
+      } finally {
+        setIsLoadingSession(false);
+      }
+    },
+    [resolvedProjectId],
+  );
+
+  // If initialSessionId changes or is provided, load its history
+  useEffect(() => {
+    if (initialSessionId) {
+      selectSession(initialSessionId);
+    }
+  }, [initialSessionId, selectSession]);
+
+  // 4. Live Chat mutation with dynamic workflow ID or project ID
   const chatMutation = useMutation<
     LiveWorkflowChatResult,
     Error,
     { message: string }
   >({
     mutationFn: ({ message }) =>
-      workflowsApi.chatLive(projectId, {
+      workflowsApi.chatLiveById(idOrProjectId, {
         message,
-        conversationId: conversationId || undefined,
+        sessionId,
+        conversationId: sessionId,
       }),
     onMutate: async ({ message }) => {
       // Optimistic user message
@@ -61,10 +130,6 @@ export function useLiveWorkflow(projectId: string) {
       return { tempId };
     },
     onSuccess: (data) => {
-      if (data.conversationId && !conversationId) {
-        setConversationId(data.conversationId);
-      }
-
       const assistantMsg: ChatMessage = {
         id: data.assistantMessage?.id || `msg_ast_${Date.now()}`,
         role: 'assistant',
@@ -80,6 +145,10 @@ export function useLiveWorkflow(projectId: string) {
       if (data.stepTraces?.length) {
         setSelectedTrace(data.stepTraces);
       }
+
+      // Invalidate and refresh sessions list
+      queryClient.invalidateQueries({ queryKey: ['live-sessions', resolvedProjectId] });
+      refetchSessions();
     },
     onError: (err) => {
       const errorMsg: ChatMessage = {
@@ -103,10 +172,17 @@ export function useLiveWorkflow(projectId: string) {
   );
 
   const resetSession = useCallback(() => {
-    setConversationId(null);
+    const freshId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `sess_${Date.now()}`;
+    setSessionId(freshId);
     setMessages([]);
     setSelectedTrace(null);
+    return freshId;
   }, []);
+
+  const activeSession = sessions.find((s) => s.id === sessionId);
 
   return {
     liveWorkflow,
@@ -117,10 +193,16 @@ export function useLiveWorkflow(projectId: string) {
     sendMessage,
     isSending: chatMutation.isPending,
     sendError: chatMutation.error,
-    conversationId,
+    sessionId,
+    conversationId: sessionId,
+    sessions,
+    isSessionsLoading,
+    isLoadingSession,
+    selectSession,
     resetSession,
+    newSession: resetSession,
+    activeSession,
     selectedTrace,
     setSelectedTrace,
   };
 }
-

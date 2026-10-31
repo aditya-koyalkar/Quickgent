@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useProjects, useCreateProject } from '../hooks/useProjects';
+import ProjectSessionsModal from '../components/dashboard/ProjectSessionsModal';
+import type { ProjectItem } from '../lib/api';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -25,6 +27,7 @@ export default function DashboardPage() {
   const [page] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [sessionsModalProject, setSessionsModalProject] = useState<ProjectItem | null>(null);
 
   const { data: projectsData, isLoading, isError } = useProjects({
     page,
@@ -254,10 +257,28 @@ export default function DashboardPage() {
                         </span>
                       </div>
 
-                      <span className="inline-flex items-center gap-1 font-medium text-neutral-900 group-hover:translate-x-0.5 transition-transform">
-                        Open Studio
-                        <ArrowRight className="size-3" />
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSessionsModalProject(project);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 hover:border-neutral-300 hover:bg-neutral-100 hover:text-neutral-900 transition-colors cursor-pointer"
+                          title="Open and inspect customer sessions for this project"
+                        >
+                          <MessageSquare className="size-3 text-emerald-600" />
+                          <span>Open Sessions</span>
+                          <span className="rounded bg-neutral-200 px-1 py-0.2 text-[10px] font-mono text-neutral-600">
+                            {project._count?.conversations || 0}
+                          </span>
+                        </button>
+
+                        <span className="inline-flex items-center gap-1 font-semibold text-xs text-neutral-900 group-hover:translate-x-0.5 transition-transform">
+                          Open Studio
+                          <ArrowRight className="size-3" />
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -342,6 +363,15 @@ export default function DashboardPage() {
             </form>
           </div>
         </div>
+      )}
+      {/* ── Project Sessions & Transcripts Modal ───────────────────── */}
+      {sessionsModalProject && (
+        <ProjectSessionsModal
+          projectId={sessionsModalProject.id}
+          projectName={sessionsModalProject.name}
+          isOpen={Boolean(sessionsModalProject)}
+          onClose={() => setSessionsModalProject(null)}
+        />
       )}
     </div>
   );

@@ -131,6 +131,9 @@ export class ConversationsService {
         take: limit,
         orderBy: { updatedAt: 'desc' },
         include: {
+          workflow: {
+            select: { id: true, version: true, note: true },
+          },
           _count: {
             select: { messages: true },
           },
@@ -178,6 +181,9 @@ export class ConversationsService {
       this.prisma.conversation.findUnique({
         where: { id: conversationId },
         include: {
+          workflow: {
+            select: { id: true, version: true, note: true },
+          },
           _count: {
             select: { messages: true },
           },
@@ -325,33 +331,7 @@ export class ConversationsService {
       },
     });
 
-    // 2. Fetch past conversation history (last 12 messages) for context
-    const recentHistory = await this.prisma.message.findMany({
-      where: {
-        conversationId,
-        id: { not: userMessage.id },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 12,
-      select: {
-        role: true,
-        content: true,
-      },
-    });
-
-    const messagesForEngine = recentHistory.reverse().map((m) => {
-      const contentObj = m.content as any;
-      const text =
-        typeof contentObj === 'string'
-          ? contentObj
-          : contentObj?.text || JSON.stringify(contentObj);
-      return {
-        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
-        content: text,
-      };
-    });
-
-    // 3. Call apps/engine Copilot Generation Endpoint
+    // 2. Call apps/engine Copilot Generation Endpoint directly with conversationId
     let engineResult: {
       explanation: string;
       architecture_highlights: string[];
@@ -364,7 +344,7 @@ export class ConversationsService {
     try {
       const engineUrl = `${this.engineUrl}/copilot/generate`;
       this.logger.debug(
-        `Invoking Engine copilot at ${engineUrl}`,
+        `Invoking Engine copilot at ${engineUrl} for conversation ${conversationId}`,
         'ConversationsService',
       );
 
@@ -376,7 +356,8 @@ export class ConversationsService {
         body: JSON.stringify({
           instruction: userText,
           current_workflow: dto.currentWorkflow,
-          messages: messagesForEngine,
+          conversation_id: conversationId,
+          project_id: projectId,
         }),
       });
 

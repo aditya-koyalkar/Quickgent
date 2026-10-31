@@ -1068,19 +1068,23 @@ export default function ProjectStudioPage() {
             )}
 
           {/* Direct Live Agent Chat Button (if a live version exists) */}
-          {workflows.find((w) => w.isLive) && (
-            <Link
-              to={`/projects/${projectId}/workflows/live`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/60 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60 transition-all shadow-xs"
-              title="Open Live Agent Chat in a new tab"
-            >
-              <Bot className="size-3 text-emerald-400" />
-              <span>Live Chat</span>
-              <ExternalLink className="size-2.5 text-emerald-400/80" />
-            </Link>
-          )}
+          {(() => {
+            const liveWf = workflows.find((w) => w.isLive);
+            if (!liveWf) return null;
+            return (
+              <Link
+                to={`/live/${liveWf.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/60 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60 transition-all shadow-xs"
+                title="Open Live Agent Chat in a new tab"
+              >
+                <Bot className="size-3 text-emerald-400" />
+                <span>Live Chat</span>
+                <ExternalLink className="size-2.5 text-emerald-400/80" />
+              </Link>
+            );
+          })()}
 
           {/* Actionable Validation Status Badge */}
           <button
@@ -1797,20 +1801,25 @@ export default function ProjectStudioPage() {
                   <button
                     type="button"
                     onClick={() => setIsConversationDropdownOpen((v) => !v)}
-                    className="flex items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs font-semibold text-white hover:border-neutral-700 transition-colors max-w-[155px] truncate"
+                    className="flex items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs font-semibold text-white hover:border-neutral-700 transition-colors max-w-[200px] truncate"
                     title="Switch or view conversations"
                   >
                     <span className="truncate">
                       {conversations.find((c) => c.id === activeConversationId)?.name || 'Conversations'}
                     </span>
+                    {conversations.find((c) => c.id === activeConversationId)?.workflowVersion && (
+                      <span className="inline-flex items-center rounded px-1 py-0.2 bg-emerald-950/80 border border-emerald-700/60 text-[9px] font-mono font-bold text-emerald-300 shrink-0">
+                        v{conversations.find((c) => c.id === activeConversationId)?.workflowVersion}
+                      </span>
+                    )}
                     <ChevronDown className="size-3 text-neutral-400 shrink-0" />
                   </button>
 
                   {isConversationDropdownOpen && (
-                    <div className="absolute left-0 top-full mt-1.5 w-64 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-2xl z-50">
+                    <div className="absolute left-0 top-full mt-1.5 w-72 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-2xl z-50">
                       <div className="flex items-center justify-between px-2 py-1 border-b border-neutral-800 mb-1">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                          Chats ({conversations.length})
+                          Chats & Sessions ({conversations.length})
                         </span>
                         <button
                           type="button"
@@ -1822,7 +1831,7 @@ export default function ProjectStudioPage() {
                         </button>
                       </div>
 
-                      <div className="max-h-56 overflow-y-auto space-y-0.5">
+                      <div className="max-h-60 overflow-y-auto space-y-0.5">
                         {conversations.length === 0 ? (
                           <div className="px-2 py-3 text-center text-[11px] text-neutral-500">
                             No conversations yet
@@ -1843,9 +1852,19 @@ export default function ProjectStudioPage() {
                                     : 'text-neutral-300 hover:bg-neutral-900/60 hover:text-white'
                                 }`}
                               >
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
                                   <MessageSquare className="size-3 text-neutral-400 shrink-0" />
                                   <span className="truncate">{conv.name}</span>
+                                  {conv.workflowVersion && (
+                                    <span className="inline-flex items-center rounded px-1 py-0.2 bg-emerald-950/80 border border-emerald-700/60 text-[9px] font-mono font-bold text-emerald-300 shrink-0">
+                                      v{conv.workflowVersion}
+                                    </span>
+                                  )}
+                                  {conv.isLive && (
+                                    <span className="rounded bg-emerald-500/10 text-emerald-400 text-[8px] font-semibold px-1 py-0.2 shrink-0">
+                                      LIVE
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0 ml-2">
                                   <span className="text-[10px] text-neutral-500">

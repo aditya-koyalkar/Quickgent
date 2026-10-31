@@ -4,16 +4,34 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .logging_config import setup_logging
 from .copilot import router as copilot_router
 from .workflow import router as workflow_router
+from .common.persistence import init_persister, close_persister
 
 # Initialize centralized logging
 logger = setup_logging()
 
-app = FastAPI(title="Quickgent Engine", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing Quickgent Engine services...")
+    try:
+        await init_persister()
+    except Exception as e:
+        logger.warning(f"Engine persister startup warning: {e}")
+    yield
+    logger.info("Shutting down Quickgent Engine services...")
+    try:
+        await close_persister()
+    except Exception as e:
+        logger.error(f"Engine persister shutdown error: {e}")
+
+
+app = FastAPI(title="Quickgent Engine", version="1.0.0", lifespan=lifespan)
 
 # CORS Configuration from env, falling back to local port 3000
 env_origins = (os.environ.get("ENGINE_CORS_ORIGINS") or os.environ.get("CORS_ORIGINS", "")).strip()

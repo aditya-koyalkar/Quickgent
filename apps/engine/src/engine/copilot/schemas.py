@@ -66,6 +66,8 @@ class CopilotGenerateRequest(BaseModel):
     instruction: str
     current_workflow: dict[str, Any] | None = None
     messages: list[ChatMessage] = Field(default_factory=list)
+    conversation_id: str | None = None
+    project_id: str | None = None
     api_key: str | None = None
 
 

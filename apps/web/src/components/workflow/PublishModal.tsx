@@ -72,6 +72,7 @@ export function PublishModal({
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSnippetCopied, setIsSnippetCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
+  const [isCustomerUrlCopied, setIsCustomerUrlCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'publish' | 'history' | 'api'>('publish');
   const [selectedVersionTag, setSelectedVersionTag] = useState<string>(currentVersion);
 
@@ -95,9 +96,14 @@ export function PublishModal({
     );
   }, [workflows, selectedVersionTag, currentVersion]);
 
+  // Dynamic clean customer-facing route and API endpoint
+  const targetLiveId = selectedWorkflow?.id || liveWorkflow?.id || projectId;
+  const originUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const customerFacingLiveUrl = `${originUrl}/live/${targetLiveId}`;
+
   const endpointUrl = typeof window !== 'undefined'
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/projects/${projectId}/workflows/live`
-    : '';
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/live/${targetLiveId}`
+    : `/api/live/${targetLiveId}`;
 
   const curlSnippet = useMemo(() => {
     let sampleInputs: Record<string, any> = { user_message: 'Hello agent!' };
@@ -214,11 +220,10 @@ export function PublishModal({
           <button
             type="button"
             onClick={() => setActiveTab('publish')}
-            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${
-              activeTab === 'publish'
+            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${activeTab === 'publish'
                 ? 'bg-neutral-800 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             <Sparkles className="size-3.5" />
             {isInitialVersion ? 'Configure Initial Version' : 'Publish as New Version'}
@@ -226,11 +231,10 @@ export function PublishModal({
           <button
             type="button"
             onClick={() => setActiveTab('history')}
-            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${
-              activeTab === 'history'
+            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${activeTab === 'history'
                 ? 'bg-neutral-800 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             <History className="size-3.5" />
             Version History ({workflows.length})
@@ -238,11 +242,10 @@ export function PublishModal({
           <button
             type="button"
             onClick={() => setActiveTab('api')}
-            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${
-              activeTab === 'api'
+            className={`flex items-center justify-center gap-1.5 flex-1 rounded-lg py-1.5 font-medium transition-all ${activeTab === 'api'
                 ? 'bg-neutral-800 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             <Terminal className="size-3.5" />
             Live Endpoint
@@ -415,16 +418,16 @@ export function PublishModal({
                     !validation.isValid
                       ? `Cannot save: ${validation.summary.errors} validation error(s) must be fixed.`
                       : !versionTag.trim()
-                      ? 'Please enter a valid version tag.'
-                      : 'Save workflow version'
+                        ? 'Please enter a valid version tag.'
+                        : 'Save workflow version'
                   }
                 >
                   <Rocket className="size-3.5" />
                   {isSubmitting
                     ? 'Saving...'
                     : isInitialVersion
-                    ? 'Save Initial Version'
-                    : 'Publish Version'}
+                      ? 'Save Initial Version'
+                      : 'Publish Version'}
                 </button>
               </div>
             </div>
@@ -446,13 +449,12 @@ export function PublishModal({
                 return (
                   <div
                     key={wf.id || wf.version}
-                    className={`rounded-xl border p-3.5 space-y-2.5 transition-all ${
-                      isSelected
+                    className={`rounded-xl border p-3.5 space-y-2.5 transition-all ${isSelected
                         ? 'border-brand-500/60 bg-brand-950/20'
                         : isLive
-                        ? 'border-emerald-800/40 bg-emerald-950/10'
-                        : 'border-neutral-800 bg-neutral-900/40 hover:border-neutral-700'
-                    }`}
+                          ? 'border-emerald-800/40 bg-emerald-950/10'
+                          : 'border-neutral-800 bg-neutral-900/40 hover:border-neutral-700'
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -462,11 +464,10 @@ export function PublishModal({
 
                         {/* Status Badge */}
                         <span
-                          className={`rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${
-                            wf.isLive
+                          className={`rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${wf.isLive
                               ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
                               : 'bg-neutral-800 border-neutral-700 text-neutral-400'
-                          }`}
+                            }`}
                         >
                           {wf.isLive ? 'LIVE' : 'DRAFT'}
                         </span>
@@ -655,7 +656,7 @@ export function PublishModal({
                       </div>
 
                       <a
-                        href={`/projects/${projectId}/workflows/live`}
+                        href={customerFacingLiveUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md transition-all cursor-pointer shrink-0"
@@ -665,6 +666,41 @@ export function PublishModal({
                       </a>
                     </div>
 
+                    {/* Customer-Facing Shareable Link */}
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white">Shareable Customer Chat URL</span>
+                          <span className="rounded px-1.5 py-0.5 bg-brand-950 text-brand-300 border border-brand-800/40 text-[9px] font-mono">
+                            Customer Facing
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(customerFacingLiveUrl);
+                            setIsCustomerUrlCopied(true);
+                            setTimeout(() => setIsCustomerUrlCopied(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          {isCustomerUrlCopied ? (
+                            <>
+                              <Check className="size-3 text-emerald-400" /> Copied Link!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="size-3" /> Copy Link
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="font-mono text-[11px] text-brand-300 bg-black/60 p-2.5 rounded-lg break-all border border-neutral-800">
+                        {customerFacingLiveUrl}
+                      </div>
+                    </div>
+
+                    {/* Backend API Endpoint */}
                     <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">

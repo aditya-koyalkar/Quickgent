@@ -8,7 +8,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from .prompts import COPILOT_SYSTEM_PROMPT
 from ..common.llm import invoke_llm_with_fallback
+from ..common.persistence import get_persister
 from .schemas import (
+    ChatMessage,
     CopilotGenerateRequest,
     CopilotGenerateResponse,
     CopilotOutputSchema,
@@ -46,8 +48,19 @@ async def execute_copilot_generation(req: CopilotGenerateRequest) -> CopilotGene
     try:
         chat_messages: list[Any] = [SystemMessage(content=COPILOT_SYSTEM_PROMPT)]
 
+        # Resolve history: if messages not provided in request, auto-fetch from DB
+        effective_messages = list(req.messages)
+        if not effective_messages and req.conversation_id:
+            try:
+                persister = get_persister()
+                db_history = await persister.get_conversation_history(req.conversation_id, limit=10)
+                for m in db_history:
+                    effective_messages.append(ChatMessage(role=m["role"], content=m["content"]))
+            except Exception as hist_err:
+                logger.warning(f"Could not load conversation history from DB for copilot: {hist_err}")
+
         # Append previous conversation history
-        for msg in req.messages[-10:]:
+        for msg in effective_messages[-10:]:
             if msg.role == "user":
                 chat_messages.append(HumanMessage(content=msg.content))
             elif msg.role == "assistant":

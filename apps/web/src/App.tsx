@@ -93,6 +93,9 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Customer-facing live agent chat routes (dynamic workflow ID or project ID) */}
+      <Route path="/live/:id" element={<LiveWorkflowChatPage />} />
+      <Route path="/chat/:id" element={<LiveWorkflowChatPage />} />
       <Route
         path="/projects/:id/live"
         element={<LiveWorkflowChatPage />}

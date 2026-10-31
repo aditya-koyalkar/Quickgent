@@ -4,11 +4,14 @@ from pydantic import BaseModel, Field
 
 class WorkflowExecuteRequest(BaseModel):
     workflow: Dict[str, Any] = Field(..., description="Canonical or Visual workflow graph JSON")
+    workflow_id: Optional[str] = Field(None, description="Optional published workflow ID in database")
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Inputs for workflow start node (e.g. user_message)")
-    session_id: Optional[str] = Field(None, description="Optional session ID for tracing")
+    session_id: Optional[str] = Field(None, description="Optional session ID for tracing (or conversation ID)")
+    conversation_id: Optional[str] = Field(None, description="Optional conversation ID for fetching DB history")
+    project_id: Optional[str] = Field(None, description="Optional project ID for associating execution")
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         default=None,
-        description="Optional recent message history for multi-turn conversational agents"
+        description="Optional recent message history for multi-turn conversational agents (auto-fetched if omitted and session_id is provided)"
     )
     api_key: Optional[str] = Field(None, description="Optional override API key")
 

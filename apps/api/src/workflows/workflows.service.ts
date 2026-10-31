@@ -472,6 +472,8 @@ export class WorkflowsService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workflow: liveWorkflow.graph,
+          workflow_id: liveWorkflow.id,
+          project_id: projectId,
           inputs,
           session_id: dto.sessionId,
         }),
@@ -482,7 +484,7 @@ export class WorkflowsService {
         try {
           const errJson = await resp.json();
           errDetail = errJson.detail || errDetail;
-        } catch {}
+        } catch { }
         throw new BadRequestException(errDetail);
       }
 
@@ -526,6 +528,64 @@ export class WorkflowsService {
   }
 
   /**
+   * Resolve a workflow either by direct workflow ID or by project ID (finding its live version)
+   */
+  async findLiveById(idOrWorkflowId: string) {
+    // 1. Try finding by direct workflow ID
+    let workflow = await this.prisma.workflow.findUnique({
+      where: { id: idOrWorkflowId },
+      include: {
+        project: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    // 2. Fallback: try finding live workflow by projectId
+    if (!workflow) {
+      workflow = await this.prisma.workflow.findFirst({
+        where: { projectId: idOrWorkflowId, isLive: true },
+        include: {
+          project: {
+            select: { id: true, name: true },
+          },
+        },
+      });
+    }
+
+    if (!workflow) {
+      throw new NotFoundException(
+        `Workflow "${idOrWorkflowId}" not found or not published.`,
+      );
+    }
+
+    return workflow;
+  }
+
+  /**
+   * Multi-turn chat using dynamic workflow ID or project ID
+   */
+  async chatLiveById(
+    idOrWorkflowId: string,
+    dto: LiveWorkflowChatDto,
+    userId?: string,
+  ) {
+    const workflow = await this.findLiveById(idOrWorkflowId);
+    return this.chatLive(workflow.projectId, dto, userId);
+  }
+
+  /**
+   * Execute live workflow using dynamic workflow ID or project ID
+   */
+  async executeLiveById(
+    idOrWorkflowId: string,
+    dto: ExecuteWorkflowDto,
+  ) {
+    const workflow = await this.findLiveById(idOrWorkflowId);
+    return this.executeLive(workflow.projectId, dto);
+  }
+
+  /**
    * Multi-turn chat with live workflow agent
    */
   async chatLive(
@@ -539,17 +599,19 @@ export class WorkflowsService {
       throw new BadRequestException('Message cannot be empty');
     }
 
-    // Find or create live conversation
+    // Find or create live conversation using frontend-generated session ID or conversationId
     let conversation: any;
-    if (dto.conversationId) {
+    const targetSessionId = dto.sessionId || dto.conversationId;
+    if (targetSessionId) {
       conversation = await this.prisma.conversation.findFirst({
-        where: { id: dto.conversationId, projectId, isActive: true },
+        where: { id: targetSessionId, projectId, isActive: true },
       });
     }
 
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: {
+          id: targetSessionId || undefined,
           projectId,
           workflowId: liveWorkflow.id,
           workflowVersion: liveWorkflow.version,
@@ -573,27 +635,7 @@ export class WorkflowsService {
       },
     });
 
-    // Fetch previous conversation history (last 10 messages)
-    const recentMessages = await this.prisma.message.findMany({
-      where: {
-        conversationId: conversation.id,
-        id: { not: userMessage.id },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      select: { role: true, content: true },
-    });
-
-    const conversationHistory = recentMessages.reverse().map((m) => {
-      const c = m.content as any;
-      const text = typeof c === 'string' ? c : c?.text || JSON.stringify(c);
-      return {
-        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
-        content: text,
-      };
-    });
-
-    // Execute workflow in engine with inputs
+    // Execute workflow in engine with inputs and session_id (engine loads DB history natively)
     const engineUrl = `${this.engineUrl}/workflow/execute`;
     let engineResult: any;
     try {
@@ -602,9 +644,10 @@ export class WorkflowsService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workflow: liveWorkflow.graph,
+          workflow_id: liveWorkflow.id,
+          project_id: projectId,
           inputs: { user_message: userText },
           session_id: conversation.id,
-          conversation_history: conversationHistory,
         }),
       });
 
@@ -613,7 +656,7 @@ export class WorkflowsService {
         try {
           const errJson = await resp.json();
           errDetail = errJson.detail || errDetail;
-        } catch {}
+        } catch { }
         throw new BadRequestException(errDetail);
       }
 
@@ -650,9 +693,19 @@ export class WorkflowsService {
       },
     });
 
-    // Persist workflow execution record
-    const execution = await this.prisma.workflowExecution.create({
-      data: {
+    // Persist or update workflow execution record (upsert handles both engine-persisted and API fallback)
+    const execution = await this.prisma.workflowExecution.upsert({
+      where: { id: engineResult.execution_id || 'unknown-id' },
+      update: {
+        status: engineResult.status || 'COMPLETED',
+        outputs: engineResult.outputs || {},
+        state: engineResult.state || {},
+        trace: engineResult.step_traces || [],
+        durationMs: Math.round(engineResult.total_duration_ms || 0),
+        totalTokens: engineResult.total_tokens || 0,
+      },
+      create: {
+        id: engineResult.execution_id || undefined,
         workflowId: liveWorkflow.id,
         projectId,
         status: engineResult.status || 'COMPLETED',
@@ -672,6 +725,8 @@ export class WorkflowsService {
 
     return {
       conversationId: conversation.id,
+      sessionId: conversation.id,
+      workflowVersion: conversation.workflowVersion || liveWorkflow.version,
       userMessage,
       assistantMessage,
       reply: engineResult.response_text,
@@ -681,11 +736,39 @@ export class WorkflowsService {
       totalTokens: engineResult.total_tokens,
       workflow: {
         id: liveWorkflow.id,
-        version: liveWorkflow.version,
+        version: conversation.workflowVersion || liveWorkflow.version,
         note: liveWorkflow.note,
         project: liveWorkflow.project,
       },
     };
+  }
+
+  /**
+   * Fetch all conversations/sessions for a project with workflow version and messages preview
+   */
+  async listLiveConversations(projectId: string) {
+    return this.prisma.conversation.findMany({
+      where: { projectId, isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        workflow: {
+          select: { id: true, version: true, note: true },
+        },
+        _count: {
+          select: { messages: true },
+        },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            role: true,
+            content: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
   }
 
   /**
@@ -695,9 +778,12 @@ export class WorkflowsService {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, projectId, isActive: true },
       include: {
+        workflow: {
+          select: { id: true, version: true, note: true },
+        },
         messages: {
           orderBy: { createdAt: 'asc' },
-          take: 50,
+          take: 100,
         },
       },
     });

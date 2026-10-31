@@ -279,6 +279,9 @@ export const workflowsApi = {
   getLive: (projectId: string) =>
     api.get<WorkflowItem>(`/projects/${projectId}/workflows/live`),
 
+  getLiveById: (workflowOrProjectId: string) =>
+    api.get<WorkflowItem>(`/live/${workflowOrProjectId}`),
+
   executeLive: (
     projectId: string,
     data: {
@@ -306,6 +309,22 @@ export const workflowsApi = {
       data,
     ),
 
+  chatLiveById: (
+    workflowOrProjectId: string,
+    data: {
+      message: string;
+      conversationId?: string;
+      sessionId?: string;
+    },
+  ) =>
+    api.post<LiveWorkflowChatResult>(
+      `/live/${workflowOrProjectId}/chat`,
+      data,
+    ),
+
+  listLiveConversations: (projectId: string) =>
+    api.get<Array<ConversationItem>>(`/projects/${projectId}/workflows/live/conversations`),
+
   getLiveConversation: (projectId: string, conversationId: string) =>
     api.get<{
       id: string;
@@ -313,6 +332,11 @@ export const workflowsApi = {
       projectId: string;
       workflowId?: string;
       workflowVersion?: string;
+      workflow?: {
+        id: string;
+        version: string;
+        note?: string | null;
+      };
       messages: MessageItem[];
     }>(`/projects/${projectId}/workflows/live/conversations/${conversationId}`),
 };
@@ -389,9 +413,17 @@ export interface ConversationItem {
   id: string;
   name: string;
   projectId: string;
+  workflowId?: string;
+  workflowVersion?: string;
+  isLive?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  workflow?: {
+    id: string;
+    version: string;
+    note?: string | null;
+  };
   _count?: {
     messages: number;
   };

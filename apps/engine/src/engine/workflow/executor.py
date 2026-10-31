@@ -17,6 +17,7 @@ from .schemas import (
 )
 from .tools import safe_calculator, get_current_datetime, live_web_search
 from ..common.llm import invoke_llm_with_fallback, get_llm
+from ..common.persistence import get_persister
 
 logger = logging.getLogger("engine.workflow.executor")
 
@@ -182,6 +183,7 @@ class WorkflowExecutor:
                 detail="Gemini API key is required. Set GOOGLE_API_KEY or GEMINI_API_KEY."
             )
         self.default_model = os.environ.get("GEMINI_MODEL") or "gemini-flash-lite-latest"
+        self.persister = get_persister()
 
     async def _invoke_llm_with_fallback(
         self,
@@ -278,11 +280,13 @@ class WorkflowExecutor:
             user_msg = user_msg.get("user_message") or user_msg.get("message") or user_msg.get("text") or str(user_msg)
         user_msg_str = str(user_msg)
 
+        effective_session_id = req.session_id or req.conversation_id or execution_id
         input_dict = {
             **raw_inputs,
             "user_message": user_msg_str,
             "message": user_msg_str,
             "text": user_msg_str,
+            "session_id": effective_session_id,
         }
 
         state: Dict[str, Any] = {
@@ -290,12 +294,45 @@ class WorkflowExecutor:
             "input": input_dict,
             "user_message": user_msg_str,
             "message": user_msg_str,
-            "session_id": req.session_id or execution_id,
+            "session_id": effective_session_id,
             "execution_id": execution_id,
         }
-        # Populate top-level state from input
+
+        # 1. Rehydrate state variables from previous execution checkpoint if available
+        if req.session_id or req.conversation_id:
+            sid = req.session_id or req.conversation_id
+            try:
+                prev_state = await self.persister.get_latest_checkpoint_state(sid)
+                if prev_state and isinstance(prev_state, dict):
+                    # Merge previous checkpoint variables into state (preserving fresh input fields)
+                    for k, v in prev_state.items():
+                        if k not in (
+                            "session_id",
+                            "execution_id",
+                            "final_output",
+                            "outputs",
+                            "inputs",
+                            "input",
+                            "user_message",
+                            "message",
+                            "text",
+                        ):
+                            state[k] = v
+            except Exception as rehydrate_err:
+                logger.warning(f"Could not rehydrate state for session {sid}: {rehydrate_err}")
+
+        # 2. Populate top-level state from input
         for k, v in input_dict.items():
             state[k] = v
+
+        # 3. Resolve conversation history: use request override or fetch directly from DB
+        effective_history = list(req.conversation_history) if req.conversation_history else None
+        if not effective_history and (req.session_id or req.conversation_id):
+            sid = req.session_id or req.conversation_id
+            try:
+                effective_history = await self.persister.get_conversation_history(sid, limit=10)
+            except Exception as hist_err:
+                logger.warning(f"Could not load conversation history from DB for session {sid}: {hist_err}")
 
         step_traces: List[NodeExecutionTrace] = []
         total_tokens = 0
@@ -380,8 +417,8 @@ class WorkflowExecutor:
                     ]
 
                     # Include conversation history if available
-                    if req.conversation_history:
-                        for prev_msg in req.conversation_history[-6:]:
+                    if effective_history:
+                        for prev_msg in effective_history[-6:]:
                             role = prev_msg.get("role", "user")
                             content = prev_msg.get("content", "")
                             if role == "user":
@@ -500,8 +537,16 @@ class WorkflowExecutor:
                     )
                     messages = [
                         SystemMessage(content=system_msg),
-                        HumanMessage(content=user_msg)
                     ]
+                    if effective_history:
+                        for prev_msg in effective_history[-6:]:
+                            role = prev_msg.get("role", "user")
+                            content = prev_msg.get("content", "")
+                            if role == "user":
+                                messages.append(HumanMessage(content=content))
+                            elif role == "assistant":
+                                messages.append(AIMessage(content=content))
+                    messages.append(HumanMessage(content=user_msg))
                     ai_resp, used_agent_model = await self._invoke_llm_with_fallback(
                         messages,
                         model_name=model_name,
@@ -703,6 +748,43 @@ class WorkflowExecutor:
 
         total_duration = (time.perf_counter() - start_time) * 1000
         has_failed = any(t.status == "failed" for t in step_traces)
+
+        # Persist execution checkpoint directly to PostgreSQL if workflow and project are resolvable
+        sid = req.session_id or req.conversation_id
+        wf_id = getattr(req, "workflow_id", None) or (state.get("workflow_id") if isinstance(state, dict) else None)
+        proj_id = req.project_id or (state.get("project_id") if isinstance(state, dict) else None)
+
+        if (not proj_id or not wf_id) and sid:
+            try:
+                conv = await self.persister.get_conversation(sid)
+                if conv:
+                    proj_id = proj_id or conv.get("project_id")
+                    wf_id = wf_id or conv.get("workflow_id")
+            except Exception as lookup_err:
+                logger.debug(f"Conversation lookup for checkpoint failed: {lookup_err}")
+
+        # Fallback to graph JSON id only if not an ephemeral client canvas ID (e.g. "wf_179344...")
+        if not wf_id:
+            raw_id = req.workflow.get("id") or req.workflow.get("workflow", {}).get("id")
+            if raw_id and not str(raw_id).startswith("wf_"):
+                wf_id = raw_id
+
+        if wf_id and proj_id:
+            try:
+                await self.persister.save_execution_checkpoint(
+                    execution_id=execution_id,
+                    workflow_id=wf_id,
+                    project_id=proj_id,
+                    status="failed" if has_failed else "completed",
+                    inputs=input_dict,
+                    outputs=state.get("final_output") or {"response": final_response_text},
+                    state=state,
+                    trace=step_traces,
+                    duration_ms=int(round(total_duration)),
+                    total_tokens=total_tokens,
+                )
+            except Exception as save_err:
+                logger.warning(f"Could not persist execution checkpoint to DB: {save_err}")
 
         return WorkflowExecuteResponse(
             execution_id=execution_id,
