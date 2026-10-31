@@ -111,6 +111,13 @@ def interpolate_template(template: str, state: Dict[str, Any]) -> str:
             val = input_data[key]
             return json.dumps(val) if isinstance(val, (dict, list)) else str(val)
 
+        # 4. Environment variables & Secrets support (e.g. {{env.API_KEY}} or {{secrets.STRIPE_KEY}})
+        if key.startswith("env.") or key.startswith("secrets."):
+            env_var_name = key.split(".", 1)[1].strip()
+            env_val = os.environ.get(env_var_name) or os.environ.get(env_var_name.upper())
+            if env_val is not None:
+                return env_val
+
         return None
 
     # Replace double braces {{ var }} first

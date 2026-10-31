@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  GatewayTimeoutException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
@@ -477,6 +478,7 @@ export class WorkflowsService {
           inputs,
           session_id: dto.sessionId,
         }),
+        signal: AbortSignal.timeout(90000), // 90s inter-service execution timeout
       });
 
       if (!resp.ok) {
@@ -495,6 +497,11 @@ export class WorkflowsService {
         err.stack,
         'WorkflowsService',
       );
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new GatewayTimeoutException(
+          'Workflow execution timed out after 90 seconds. Please optimize your workflow or reduce step latency.',
+        );
+      }
       if (err instanceof BadRequestException) throw err;
       throw new BadRequestException(err.message || 'Workflow execution failed');
     }
@@ -649,6 +656,7 @@ export class WorkflowsService {
           inputs: { user_message: userText },
           session_id: conversation.id,
         }),
+        signal: AbortSignal.timeout(90000), // 90s inter-service execution timeout
       });
 
       if (!resp.ok) {
@@ -667,6 +675,11 @@ export class WorkflowsService {
         err.stack,
         'WorkflowsService',
       );
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new GatewayTimeoutException(
+          'Agent response timed out after 90 seconds. The engine or model took too long to complete.',
+        );
+      }
       if (err instanceof BadRequestException) throw err;
       throw new BadRequestException(
         err.message || 'Agent failed to run workflow',

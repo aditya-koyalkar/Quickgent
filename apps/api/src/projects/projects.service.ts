@@ -193,4 +193,69 @@ export class ProjectsService {
 
     return updated;
   }
+
+  /**
+   * Get execution metrics, token counts, latency, and success rates for a project
+   */
+  async getAnalytics(userId: string, projectId: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, userId },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const [totalExecutions, completedExecutions, failedExecutions, aggregateMetrics, recentExecutions] =
+      await Promise.all([
+        this.prisma.workflowExecution.count({ where: { projectId } }),
+        this.prisma.workflowExecution.count({
+          where: { projectId, status: 'completed' },
+        }),
+        this.prisma.workflowExecution.count({
+          where: { projectId, status: 'failed' },
+        }),
+        this.prisma.workflowExecution.aggregate({
+          where: { projectId },
+          _sum: { totalTokens: true, durationMs: true },
+          _avg: { durationMs: true, totalTokens: true },
+        }),
+        this.prisma.workflowExecution.findMany({
+          where: { projectId },
+          take: 20,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            workflow: {
+              select: { version: true, note: true },
+            },
+          },
+        }),
+      ]);
+
+    const totalTokens = aggregateMetrics._sum.totalTokens || 0;
+    const avgDurationMs = Math.round(aggregateMetrics._avg.durationMs || 0);
+    const avgTokens = Math.round(aggregateMetrics._avg.totalTokens || 0);
+    const successRate = totalExecutions > 0 ? Math.round((completedExecutions / totalExecutions) * 100) : 100;
+
+    return {
+      summary: {
+        totalExecutions,
+        successfulExecutions: completedExecutions,
+        failedExecutions,
+        successRate,
+        totalTokens,
+        averageDurationMs: avgDurationMs,
+        averageTokens: avgTokens,
+      },
+      recentExecutions: recentExecutions.map((e) => ({
+        id: e.id,
+        workflowId: e.workflowId,
+        workflowVersion: e.workflow?.version || '1.0.0',
+        status: e.status,
+        durationMs: e.durationMs || 0,
+        totalTokens: e.totalTokens || 0,
+        createdAt: e.createdAt,
+      })),
+    };
+  }
 }

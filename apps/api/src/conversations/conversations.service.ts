@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  GatewayTimeoutException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
@@ -359,6 +360,7 @@ export class ConversationsService {
           conversation_id: conversationId,
           project_id: projectId,
         }),
+        signal: AbortSignal.timeout(60000), // 60s timeout for copilot generation
       });
 
       if (!response.ok) {
@@ -380,6 +382,11 @@ export class ConversationsService {
         err.stack,
         'ConversationsService',
       );
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new GatewayTimeoutException(
+          'AI Copilot generation timed out after 60 seconds. Please try again.',
+        );
+      }
       if (err instanceof BadRequestException) {
         throw err;
       }

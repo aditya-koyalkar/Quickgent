@@ -123,4 +123,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (keys.length === 0) return 0;
     return this.del(...keys);
   }
+
+  /**
+   * Ping Redis server
+   */
+  async ping(): Promise<string> {
+    if (!this.client) return 'DISCONNECTED';
+    return this.client.ping();
+  }
 }

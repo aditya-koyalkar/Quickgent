@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { WorkflowsService } from './workflows.service';
 import { LiveWorkflowChatDto, ExecuteWorkflowDto } from './dto';
 import { Public } from '../auth/decorators/public.decorator';
@@ -24,6 +25,7 @@ export class LiveController {
 
   @Post(':id/chat')
   @Public()
+  @Throttle({ default: { limit: 25, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   chatLive(
     @Param('id') id: string,
@@ -34,6 +36,7 @@ export class LiveController {
 
   @Post(':id/run')
   @Public()
+  @Throttle({ default: { limit: 25, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   executeLive(
     @Param('id') id: string,

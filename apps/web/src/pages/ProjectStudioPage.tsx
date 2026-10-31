@@ -34,6 +34,7 @@ import {
   ExternalLink,
   LayoutGrid,
   HelpCircle,
+  BarChart2,
 } from 'lucide-react';
 import { useProject, useUpdateProject } from '../hooks/useProjects';
 import {
@@ -72,6 +73,8 @@ import { TestPanel } from '../components/workflow/TestPanel';
 import { PublishModal } from '../components/workflow/PublishModal';
 import { CanvasMinimap } from '../components/workflow/CanvasMinimap';
 import { JsonModal } from '../components/workflow/JsonModal';
+
+import ProjectAnalyticsModal from '../components/dashboard/ProjectAnalyticsModal';
 
 // ── Node Dimension Constants ──────────────────────────────────────────
 export const NODE_WIDTH = 240;
@@ -131,6 +134,8 @@ export default function ProjectStudioPage() {
   const [isValidationOpen, setIsValidationOpen] = useState(false);
   const [isTestPanelOpen, setIsTestPanelOpen] = useState(false);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
 
@@ -1085,6 +1090,17 @@ export default function ProjectStudioPage() {
               </Link>
             );
           })()}
+
+          {/* Execution Analytics Button */}
+          <button
+            type="button"
+            onClick={() => setIsAnalyticsOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800/80 px-2.5 py-1 text-xs font-semibold text-neutral-300 hover:bg-neutral-700 hover:text-white transition-all shadow-xs cursor-pointer"
+            title="View execution analytics, tokens, and latency"
+          >
+            <BarChart2 className="size-3 text-brand-400" />
+            <span>Analytics</span>
+          </button>
 
           {/* Actionable Validation Status Badge */}
           <button
@@ -2168,6 +2184,13 @@ export default function ProjectStudioPage() {
         onSelectVersion={handleSelectVersion}
         onMakeLive={handleMakeLive}
         onPublishNewVersion={handlePublishNewVersion}
+      />
+
+      <ProjectAnalyticsModal
+        projectId={projectId}
+        projectName={project?.name || 'Project'}
+        isOpen={isAnalyticsOpen}
+        onClose={() => setIsAnalyticsOpen(false)}
       />
 
       {/* ── Canonical JSON Modal ───────────────────────────────────────── */}

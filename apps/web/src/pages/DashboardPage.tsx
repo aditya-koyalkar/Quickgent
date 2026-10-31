@@ -13,10 +13,12 @@ import {
   LogOut,
   Sparkles,
   Bot,
+  BarChart2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useProjects, useCreateProject } from '../hooks/useProjects';
 import ProjectSessionsModal from '../components/dashboard/ProjectSessionsModal';
+import ProjectAnalyticsModal from '../components/dashboard/ProjectAnalyticsModal';
 import type { ProjectItem } from '../lib/api';
 
 export default function DashboardPage() {
@@ -28,6 +30,7 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [sessionsModalProject, setSessionsModalProject] = useState<ProjectItem | null>(null);
+  const [analyticsModalProject, setAnalyticsModalProject] = useState<ProjectItem | null>(null);
 
   const { data: projectsData, isLoading, isError } = useProjects({
     page,
@@ -262,6 +265,19 @@ export default function DashboardPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            setAnalyticsModalProject(project);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs font-semibold text-neutral-700 hover:border-neutral-300 hover:bg-neutral-100 hover:text-neutral-900 transition-colors cursor-pointer"
+                          title="View project execution telemetry and token usage"
+                        >
+                          <BarChart2 className="size-3 text-brand-600" />
+                          <span>Analytics</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSessionsModalProject(project);
                           }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 hover:border-neutral-300 hover:bg-neutral-100 hover:text-neutral-900 transition-colors cursor-pointer"
@@ -371,6 +387,16 @@ export default function DashboardPage() {
           projectName={sessionsModalProject.name}
           isOpen={Boolean(sessionsModalProject)}
           onClose={() => setSessionsModalProject(null)}
+        />
+      )}
+
+      {/* ── Project Analytics & Token Telemetry Modal ──────────────── */}
+      {analyticsModalProject && (
+        <ProjectAnalyticsModal
+          projectId={analyticsModalProject.id}
+          projectName={analyticsModalProject.name}
+          isOpen={Boolean(analyticsModalProject)}
+          onClose={() => setAnalyticsModalProject(null)}
         />
       )}
     </div>

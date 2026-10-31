@@ -222,6 +222,27 @@ export interface ProjectsResponse {
   };
 }
 
+export interface ProjectAnalytics {
+  summary: {
+    totalExecutions: number;
+    successfulExecutions: number;
+    failedExecutions: number;
+    successRate: number;
+    totalTokens: number;
+    averageDurationMs: number;
+    averageTokens: number;
+  };
+  recentExecutions: Array<{
+    id: string;
+    workflowId: string;
+    workflowVersion?: string;
+    status: string;
+    durationMs: number;
+    totalTokens: number;
+    createdAt: string;
+  }>;
+}
+
 // ── Projects API functions ──────────────────────────────────────────
 export const projectsApi = {
   list: (params?: { page?: number; limit?: number; search?: string }) => {
@@ -234,6 +255,8 @@ export const projectsApi = {
   },
 
   get: (id: string) => api.get<ProjectDetail>(`/projects/${id}`),
+
+  getAnalytics: (id: string) => api.get<ProjectAnalytics>(`/projects/${id}/analytics`),
 
   create: (data: { name?: string }) => api.post<ProjectItem>('/projects', data),
 

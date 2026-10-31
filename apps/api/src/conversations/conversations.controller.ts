@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ConversationsService } from './conversations.service';
 import {
   CreateConversationDto,
@@ -82,6 +83,7 @@ export class ConversationsController {
   }
 
   @Post(':id/messages')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   sendMessage(
     @CurrentUser('sub') userId: string,

@@ -1,4 +1,4 @@
-import { IsOptional, IsObject, IsString } from 'class-validator';
+import { IsOptional, IsObject, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class ExecuteWorkflowDto {
   @IsOptional()
@@ -7,10 +7,12 @@ export class ExecuteWorkflowDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(8000)
   message?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(8000)
   user_message?: string;
 
   @IsOptional()
@@ -20,6 +22,8 @@ export class ExecuteWorkflowDto {
 
 export class LiveWorkflowChatDto {
   @IsString()
+  @MinLength(1)
+  @MaxLength(8000)
   message: string;
 
   @IsOptional()

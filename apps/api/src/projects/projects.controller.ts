@@ -53,4 +53,13 @@ export class ProjectsController {
   ) {
     return this.projectsService.update(userId, id, dto);
   }
+
+  @Get(':id/analytics')
+  @HttpCode(HttpStatus.OK)
+  getAnalytics(
+    @CurrentUser('sub') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.projectsService.getAnalytics(userId, id);
+  }
 }

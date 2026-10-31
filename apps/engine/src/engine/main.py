@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .logging_config import setup_logging
 from .copilot import router as copilot_router
 from .workflow import router as workflow_router
-from .common.persistence import init_persister, close_persister
+from .common.persistence import init_persister, close_persister, get_persister
 
 # Initialize centralized logging
 logger = setup_logging()
@@ -57,8 +57,15 @@ app.add_middleware(
 )
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "service": "quickgent-engine"}
+async def health():
+    persister = get_persister()
+    db_connected = persister.is_connected and persister.pool is not None
+    return {
+        "status": "ok" if db_connected else "degraded",
+        "service": "quickgent-engine",
+        "database": "connected" if db_connected else "disconnected",
+        "active_url": persister.active_url.split("@")[-1] if persister.active_url and "@" in persister.active_url else persister.active_url,
+    }
 
 app.include_router(copilot_router, prefix="/copilot", tags=["Copilot"])
 app.include_router(workflow_router, prefix="/workflow", tags=["Workflow"])
