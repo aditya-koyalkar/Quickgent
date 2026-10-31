@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from .prompts import COPILOT_SYSTEM_PROMPT
+from ..common.llm import invoke_llm_with_fallback
 from .schemas import (
     CopilotGenerateRequest,
     CopilotGenerateResponse,
@@ -43,18 +44,6 @@ async def execute_copilot_generation(req: CopilotGenerateRequest) -> CopilotGene
         )
 
     try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        model_name = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
-        logger.debug(f"Initializing ChatGoogleGenerativeAI model='{model_name}'")
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=google_api_key,
-            temperature=0.2,
-        )
-
-        structured_llm = model.with_structured_output(CopilotOutputSchema)
-
         chat_messages: list[Any] = [SystemMessage(content=COPILOT_SYSTEM_PROMPT)]
 
         # Append previous conversation history
@@ -76,8 +65,13 @@ async def execute_copilot_generation(req: CopilotGenerateRequest) -> CopilotGene
 
         chat_messages.append(HumanMessage(content=prompt_content))
 
-        logger.info(f"Invoking Gemini structured generation with {len(chat_messages)} context messages...")
-        generated: CopilotOutputSchema = await structured_llm.ainvoke(chat_messages)
+        generated: CopilotOutputSchema
+        generated, used_model = await invoke_llm_with_fallback(
+            messages=chat_messages,
+            temperature=0.2,
+            google_api_key=google_api_key,
+            structured_schema=CopilotOutputSchema,
+        )
 
         duration = time.perf_counter() - start_time
         workflow_dump = None
@@ -107,7 +101,7 @@ async def execute_copilot_generation(req: CopilotGenerateRequest) -> CopilotGene
             needs_clarification=generated.needs_clarification,
             clarification_questions=generated.clarification_questions,
             metadata={
-                "model": model_name,
+                "model": used_model,
                 "provider": "google",
                 "duration_seconds": round(duration, 3),
             }

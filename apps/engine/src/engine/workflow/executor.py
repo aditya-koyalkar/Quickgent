@@ -16,6 +16,7 @@ from .schemas import (
     ToolCallTrace,
 )
 from .tools import safe_calculator, get_current_datetime, live_web_search
+from ..common.llm import invoke_llm_with_fallback, get_llm
 
 logger = logging.getLogger("engine.workflow.executor")
 
@@ -180,21 +181,26 @@ class WorkflowExecutor:
                 status_code=400,
                 detail="Gemini API key is required. Set GOOGLE_API_KEY or GEMINI_API_KEY."
             )
-        self.default_model = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
+        self.default_model = os.environ.get("GEMINI_MODEL") or "gemini-flash-lite-latest"
+
+    async def _invoke_llm_with_fallback(
+        self,
+        messages: list,
+        model_name: Optional[str] = None,
+        temperature: float = 0.7,
+    ):
+        return await invoke_llm_with_fallback(
+            messages=messages,
+            model_name=model_name or self.default_model,
+            temperature=temperature,
+            google_api_key=self.google_api_key,
+        )
 
     def _get_llm(self, model_name: Optional[str] = None, temperature: float = 0.7):
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        target_model = model_name or self.default_model
-        # Map deprecated or non-Gemini names if selected in UI
-        if any(d in target_model.lower() for d in ("gemini-2.5", "gemini-1.5", "gemini-2.0")):
-            target_model = "gemini-3.8-flash"
-        elif "gemini" not in target_model.lower():
-            target_model = self.default_model
-
-        return ChatGoogleGenerativeAI(
-            model=target_model,
-            google_api_key=self.google_api_key,
+        return get_llm(
+            model_name=model_name or self.default_model,
             temperature=temperature,
+            google_api_key=self.google_api_key,
         )
 
     def _normalize_graph(self, workflow_raw: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -369,7 +375,6 @@ class WorkflowExecutor:
                     model_name = node_config.get("model", self.default_model)
                     response_format = node_config.get("responseFormat", "text")
 
-                    llm = self._get_llm(model_name=model_name, temperature=temperature)
                     messages = [
                         SystemMessage(content=interpolate_template(system_prompt, state)),
                     ]
@@ -386,7 +391,11 @@ class WorkflowExecutor:
 
                     messages.append(HumanMessage(content=interpolated_user))
 
-                    ai_resp = await llm.ainvoke(messages)
+                    ai_resp, used_model = await self._invoke_llm_with_fallback(
+                        messages,
+                        model_name=model_name,
+                        temperature=temperature,
+                    )
                     generated_text = extract_text_from_ai_content(ai_resp.content)
 
                     # Token accounting estimation
@@ -409,7 +418,7 @@ class WorkflowExecutor:
                     node_output = {
                         "text": generated_text,
                         "json": parsed_json,
-                        "model": model_name,
+                        "model": used_model,
                     }
                     state["llm_output"] = generated_text
                     state["agent_output"] = generated_text
@@ -483,7 +492,6 @@ class WorkflowExecutor:
                             agent_context_text += f"\n[Tool Observation calculator for '{expr}']: {calc_res}"
 
                     # Final reasoning synthesis with Gemini
-                    llm = self._get_llm(model_name=model_name, temperature=temperature)
                     system_msg = (
                         f"{interpolated_instructions}\n"
                         f"Tools available and observations gathered:\n"
@@ -494,13 +502,18 @@ class WorkflowExecutor:
                         SystemMessage(content=system_msg),
                         HumanMessage(content=user_msg)
                     ]
-                    ai_resp = await llm.ainvoke(messages)
+                    ai_resp, used_agent_model = await self._invoke_llm_with_fallback(
+                        messages,
+                        model_name=model_name,
+                        temperature=temperature,
+                    )
                     agent_answer = extract_text_from_ai_content(ai_resp.content)
 
                     node_output = {
                         "result": agent_answer,
                         "tools_used": [t.tool_name for t in tool_calls_trace],
                         "iterations": len(tool_calls_trace),
+                        "model": used_agent_model,
                     }
                     state["agent_output"] = agent_answer
                     state["llm_output"] = agent_answer
@@ -570,8 +583,10 @@ class WorkflowExecutor:
                         f"Produce ONLY valid JSON conforming to this schema:\n{output_schema}\n"
                         f"Source text: {source_text}"
                     )
-                    llm = self._get_llm(temperature=0.1)
-                    ai_resp = await llm.ainvoke([HumanMessage(content=prompt)])
+                    ai_resp, _ = await self._invoke_llm_with_fallback(
+                        [HumanMessage(content=prompt)],
+                        temperature=0.1,
+                    )
                     raw_out = str(ai_resp.content).strip()
                     if raw_out.startswith("```"):
                         raw_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_out, flags=re.MULTILINE).strip()
