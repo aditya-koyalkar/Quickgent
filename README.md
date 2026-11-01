@@ -59,6 +59,41 @@ Quickgent is organized as a decoupled, multi-tier system with strict separation 
 
 ---
 
+## Infrastructure & Production Topology
+
+Quickgent leverages a modern, serverless cloud topology designed for maximum availability, automated CI/CD, and cost efficiency.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              PRODUCTION DEPLOYMENT TOPOLOGY                            │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+    [ End Users / Browsers ]
+               │
+               ├─► (Web App) ────────► Cloudflare Pages (Edge CDN)
+               │                         • React 19 + Vite Single Page App
+               │                         • Global Edge Caching & TLS Termination
+               │                         • Automated Git CI/CD Deployment
+               │
+               └─► (API Calls) ──────► Google Cloud Run: API Gateway (NestJS)
+                                         • Authentication & JWT Session Cookies
+                                         • Request Validation & Rate Limiting
+                                         • Prisma ORM & Transaction Manager
+                                         │
+                                         ├─► Managed PostgreSQL (Relational DB)
+                                         ├─► Managed Redis (Session Cache)
+                                         │
+                                         └─► (HMAC-SHA256 Internal Request)
+                                                 │
+                                                 ▼
+                                       Google Cloud Run: Compute Engine (FastAPI)
+                                         • Pure Stateless AI Compute Worker
+                                         • Real-Time Token Streaming (SSE)
+                                         • Autonomous Agent Tools & LLM Provider
+```
+
+---
+
 ## Monorepo Directory Structure
 
 ```
