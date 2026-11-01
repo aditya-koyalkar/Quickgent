@@ -31,7 +31,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly logger: LoggerService,
-  ) {}
+  ) { }
 
   private extractMetadata(req: Request) {
     const ip =
@@ -43,13 +43,12 @@ export class AuthController {
   }
 
   private setAuthCookies(res: Response, tokens: AuthTokens) {
-    const isProduction = process.env.NODE_ENV === 'production';
-
+    const isProduction = process.env.NODE_ENV === 'production'
     // Access Token Cookie (15 min)
     res.cookie('access_token', tokens.accessToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+      secure: isProduction ? true : false,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000,
       path: '/',
     });
@@ -57,26 +56,27 @@ export class AuthController {
     // Refresh Token Cookie (7 days)
     res.cookie('refresh_token', tokens.refreshToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+      secure: isProduction ? true : false,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/auth',
+      path: '/',
     });
   }
 
   private clearAuthCookies(res: Response) {
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = process.env.NODE_ENV === 'production'
+
     res.clearCookie('access_token', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+      secure: isProduction ? true : false,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/',
     });
     res.clearCookie('refresh_token', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/auth',
+      secure: isProduction ? true : false,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
     });
   }
 
