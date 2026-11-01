@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { json, urlencoded } from 'express';
 import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -15,6 +16,10 @@ async function bootstrap() {
 
   // Security headers
   app.use(helmet());
+
+  // Prevent memory exhaustion / Denial-of-Service via huge payload attacks
+  app.use(json({ limit: '5mb' }));
+  app.use(urlencoded({ extended: true, limit: '5mb' }));
 
   // Cookie parsing for HttpOnly JWT tokens
   app.use(cookieParser());

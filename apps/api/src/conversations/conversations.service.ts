@@ -9,6 +9,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { LoggerService } from '../logger/logger.service';
+import { getEngineAuthHeaders } from '../common/engine-auth';
 import {
   CreateConversationDto,
   UpdateConversationDto,
@@ -342,6 +343,31 @@ export class ConversationsService {
       metadata?: any;
     };
 
+    // Fetch up to 20 past conversation messages (excluding current message)
+    const pastMessages = await this.prisma.message.findMany({
+      where: {
+        conversationId,
+        id: { not: userMessage.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const messagesHistory = pastMessages.reverse().map((m) => {
+      let contentText = '';
+      if (typeof m.content === 'string') {
+        contentText = m.content;
+      } else if (m.content && typeof m.content === 'object') {
+        contentText =
+          (m.content as any).text ||
+          (m.content as any).message ||
+          JSON.stringify(m.content);
+      }
+      return {
+        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
+        content: contentText,
+      };
+    });
+
     try {
       const engineUrl = `${this.engineUrl}/copilot/generate`;
       this.logger.debug(
@@ -351,14 +377,13 @@ export class ConversationsService {
 
       const response = await fetch(engineUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getEngineAuthHeaders('POST', '/copilot/generate') as any,
         body: JSON.stringify({
           instruction: userText,
           current_workflow: dto.currentWorkflow,
           conversation_id: conversationId,
           project_id: projectId,
+          messages: messagesHistory,
         }),
         signal: AbortSignal.timeout(60000), // 60s timeout for copilot generation
       });

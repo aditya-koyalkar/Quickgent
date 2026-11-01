@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import {
   SignUpDto,
@@ -80,6 +81,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
   async signUp(
@@ -95,6 +97,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('signin')
   @HttpCode(HttpStatus.OK)
   async signIn(
@@ -195,6 +198,7 @@ export class AuthController {
   }
 
   @Patch('change-password')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser('sub') userId: string,

@@ -5,11 +5,13 @@ import {
   ConflictException,
   GatewayTimeoutException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { LoggerService } from '../logger/logger.service';
+import { getEngineAuthHeaders } from '../common/engine-auth';
 import {
   CreateWorkflowDto,
   UpdateWorkflowDto,
@@ -470,7 +472,7 @@ export class WorkflowsService {
     try {
       const resp = await fetch(engineUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getEngineAuthHeaders('POST', '/workflow/execute') as any,
         body: JSON.stringify({
           workflow: liveWorkflow.graph,
           workflow_id: liveWorkflow.id,
@@ -582,6 +584,19 @@ export class WorkflowsService {
   }
 
   /**
+   * Multi-turn chat using dynamic workflow ID or project ID with SSE streaming
+   */
+  async chatLiveStreamById(
+    idOrWorkflowId: string,
+    dto: LiveWorkflowChatDto,
+    res: Response,
+    userId?: string,
+  ) {
+    const workflow = await this.findLiveById(idOrWorkflowId);
+    return this.chatLiveStream(workflow.projectId, dto, res, userId);
+  }
+
+  /**
    * Execute live workflow using dynamic workflow ID or project ID
    */
   async executeLiveById(
@@ -642,19 +657,45 @@ export class WorkflowsService {
       },
     });
 
-    // Execute workflow in engine with inputs and session_id (engine loads DB history natively)
+    // Fetch up to 20 past conversation messages (excluding current message)
+    const pastMessages = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+        id: { not: userMessage.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const conversationHistory = pastMessages.reverse().map((m) => {
+      let contentText = '';
+      if (typeof m.content === 'string') {
+        contentText = m.content;
+      } else if (m.content && typeof m.content === 'object') {
+        contentText =
+          (m.content as any).text ||
+          (m.content as any).message ||
+          JSON.stringify(m.content);
+      }
+      return {
+        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
+        content: contentText,
+      };
+    });
+
+    // Execute workflow in engine with inputs and session_id (API provides past history)
     const engineUrl = `${this.engineUrl}/workflow/execute`;
     let engineResult: any;
     try {
       const resp = await fetch(engineUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getEngineAuthHeaders('POST', '/workflow/execute') as any,
         body: JSON.stringify({
           workflow: liveWorkflow.graph,
           workflow_id: liveWorkflow.id,
           project_id: projectId,
           inputs: { user_message: userText },
           session_id: conversation.id,
+          conversation_history: conversationHistory,
         }),
         signal: AbortSignal.timeout(90000), // 90s inter-service execution timeout
       });
@@ -754,6 +795,275 @@ export class WorkflowsService {
         project: liveWorkflow.project,
       },
     };
+  }
+
+  /**
+   * Multi-turn chat with live workflow agent streaming real-time tokens via SSE
+   */
+  async chatLiveStream(
+    projectId: string,
+    dto: LiveWorkflowChatDto,
+    res: Response,
+    _userId?: string,
+  ) {
+    const userText = dto.message?.trim();
+    if (!userText) {
+      res.status(400).json({ message: 'Message cannot be empty' });
+      return;
+    }
+
+    let liveWorkflow: any;
+    try {
+      liveWorkflow = await this.findLive(projectId);
+    } catch (err: any) {
+      res.status(404).json({ message: err.message || 'Live workflow not found' });
+      return;
+    }
+
+    // Set SSE HTTP response headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
+    }
+
+    // Find or create conversation
+    let conversation: any;
+    const targetSessionId = dto.sessionId || dto.conversationId;
+    if (targetSessionId) {
+      conversation = await this.prisma.conversation.findFirst({
+        where: { id: targetSessionId, projectId, isActive: true },
+      });
+    }
+
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: {
+          id: targetSessionId || undefined,
+          projectId,
+          workflowId: liveWorkflow.id,
+          workflowVersion: liveWorkflow.version,
+          isLive: true,
+          name: userText.length > 35 ? `${userText.slice(0, 35)}…` : userText,
+        },
+      });
+    }
+
+    // Store user message
+    const userMessage = await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'USER',
+        content: { text: userText },
+        metadata: {
+          workflowId: liveWorkflow.id,
+          workflowVersion: liveWorkflow.version,
+          isLive: true,
+        },
+      },
+    });
+
+    // Notify client of session initialization
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'session_init',
+        conversationId: conversation.id,
+        userMessageId: userMessage.id,
+        workflowId: liveWorkflow.id,
+        version: liveWorkflow.version,
+      })}\n\n`,
+    );
+
+    // Fetch past conversation history (up to 20 past messages, excluding current)
+    const pastMessages = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+        id: { not: userMessage.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const conversationHistory = pastMessages.reverse().map((m) => {
+      let contentText = '';
+      if (typeof m.content === 'string') {
+        contentText = m.content;
+      } else if (m.content && typeof m.content === 'object') {
+        contentText =
+          (m.content as any).text ||
+          (m.content as any).message ||
+          JSON.stringify(m.content);
+      }
+      return {
+        role: m.role.toLowerCase() === 'user' ? 'user' : 'assistant',
+        content: contentText,
+      };
+    });
+
+    // Stream from engine with HMAC authentication
+    const engineUrl = `${this.engineUrl}/workflow/execute/stream`;
+    let engineResp: globalThis.Response;
+
+    try {
+      engineResp = await fetch(engineUrl, {
+        method: 'POST',
+        headers: getEngineAuthHeaders('POST', '/workflow/execute/stream') as any,
+        body: JSON.stringify({
+          workflow: liveWorkflow.graph,
+          workflow_id: liveWorkflow.id,
+          project_id: projectId,
+          inputs: { user_message: userText },
+          session_id: conversation.id,
+          conversation_history: conversationHistory,
+        }),
+        signal: AbortSignal.timeout(90000),
+      });
+
+      if (!engineResp.ok || !engineResp.body) {
+        let errDetail = `Engine error (${engineResp.status})`;
+        try {
+          const errJson = await engineResp.json();
+          errDetail = errJson.detail || errDetail;
+        } catch {}
+        res.write(`data: ${JSON.stringify({ type: 'error', error: errDetail })}\n\n`);
+        res.end();
+        return;
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to connect to engine stream: ${err.message}`,
+        err.stack,
+        'WorkflowsService',
+      );
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const msg = isTimeout
+        ? 'Agent response timed out after 90 seconds.'
+        : err.message || 'Workflow streaming failed to start';
+      res.write(`data: ${JSON.stringify({ type: 'error', error: msg })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const reader = engineResp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let donePayload: any = null;
+
+    // Handle client disconnection
+    let clientDisconnected = false;
+    res.on('close', () => {
+      clientDisconnected = true;
+      reader.cancel().catch(() => {});
+    });
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || clientDisconnected) break;
+
+        const chunkStr = decoder.decode(value, { stream: true });
+        res.write(chunkStr);
+
+        buffer += chunkStr;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(trimmed.slice(6));
+              if (parsed.type === 'done') {
+                donePayload = parsed;
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (streamErr: any) {
+      if (!clientDisconnected) {
+        this.logger.error(
+          `Error reading stream from engine: ${streamErr.message}`,
+          streamErr.stack,
+          'WorkflowsService',
+        );
+        res.write(`data: ${JSON.stringify({ type: 'error', error: streamErr.message })}\n\n`);
+      }
+    }
+
+    // Persist completed assistant message and execution checkpoint to PostgreSQL via Prisma
+    if (donePayload) {
+      try {
+        const assistantMessage = await this.prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            role: 'ASSISTANT',
+            content: {
+              text: donePayload.response_text,
+              outputs: donePayload.outputs,
+            },
+            metadata: {
+              workflowId: liveWorkflow.id,
+              workflowVersion: liveWorkflow.version,
+              executionId: donePayload.execution_id,
+              stepTraces: donePayload.step_traces,
+              durationMs: donePayload.total_duration_ms,
+              totalTokens: donePayload.total_tokens,
+            },
+            model: 'gemini-workflow-agent',
+          },
+        });
+
+        await this.prisma.workflowExecution.upsert({
+          where: { id: donePayload.execution_id || 'unknown-id' },
+          update: {
+            status: donePayload.status || 'completed',
+            outputs: donePayload.outputs || {},
+            state: donePayload.state || {},
+            trace: donePayload.step_traces || [],
+            durationMs: Math.round(donePayload.total_duration_ms || 0),
+            totalTokens: donePayload.total_tokens || 0,
+          },
+          create: {
+            id: donePayload.execution_id || undefined,
+            workflowId: liveWorkflow.id,
+            projectId,
+            status: donePayload.status || 'completed',
+            inputs: { user_message: userText },
+            outputs: donePayload.outputs || {},
+            state: donePayload.state || {},
+            trace: donePayload.step_traces || [],
+            durationMs: Math.round(donePayload.total_duration_ms || 0),
+            totalTokens: donePayload.total_tokens || 0,
+          },
+        });
+
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { updatedAt: new Date() },
+        });
+
+        if (!clientDisconnected) {
+          res.write(
+            `data: ${JSON.stringify({
+              type: 'persisted',
+              conversationId: conversation.id,
+              assistantMessageId: assistantMessage.id,
+            })}\n\n`,
+          );
+        }
+      } catch (dbErr: any) {
+        this.logger.warn(
+          `Could not persist streamed assistant message: ${dbErr.message}`,
+          'WorkflowsService',
+        );
+      }
+    }
+
+    if (!clientDisconnected) {
+      res.end();
+    }
   }
 
   /**

@@ -4,9 +4,11 @@ import {
   Post,
   Body,
   Param,
+  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { WorkflowsService } from './workflows.service';
 import { LiveWorkflowChatDto, ExecuteWorkflowDto } from './dto';
@@ -32,6 +34,17 @@ export class LiveController {
     @Body() dto: LiveWorkflowChatDto,
   ) {
     return this.workflowsService.chatLiveById(id, dto);
+  }
+
+  @Post(':id/chat/stream')
+  @Public()
+  @Throttle({ default: { limit: 25, ttl: 60000 } })
+  async chatLiveStream(
+    @Param('id') id: string,
+    @Body() dto: LiveWorkflowChatDto,
+    @Res() res: Response,
+  ) {
+    return this.workflowsService.chatLiveStreamById(id, dto, res);
   }
 
   @Post(':id/run')

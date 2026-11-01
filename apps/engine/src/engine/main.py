@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .logging_config import setup_logging
 from .copilot import router as copilot_router
 from .workflow import router as workflow_router
-from .common.persistence import init_persister, close_persister, get_persister
+from .common.auth import verify_engine_request
 
 # Initialize centralized logging
 logger = setup_logging()
@@ -18,17 +19,9 @@ logger = setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing Quickgent Engine services...")
-    try:
-        await init_persister()
-    except Exception as e:
-        logger.warning(f"Engine persister startup warning: {e}")
+    logger.info("Initializing Quickgent Engine services in stateless compute mode...")
     yield
     logger.info("Shutting down Quickgent Engine services...")
-    try:
-        await close_persister()
-    except Exception as e:
-        logger.error(f"Engine persister shutdown error: {e}")
 
 
 app = FastAPI(title="Quickgent Engine", version="1.0.0", lifespan=lifespan)
@@ -56,16 +49,47 @@ app.add_middleware(
     max_age=600,
 )
 
+
+@app.middleware("http")
+async def server_to_server_auth_middleware(request: Request, call_next):
+    """
+    Enforces time-based HMAC cryptographic signature authentication on all internal Engine APIs.
+    Allows unauthenticated access only to /health, OpenAPI docs, and CORS preflight OPTIONS.
+    """
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path
+    if path in ("/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/static"):
+        return await call_next(request)
+
+    try:
+        verify_engine_request(request)
+    except HTTPException as http_err:
+        return JSONResponse(
+            status_code=http_err.status_code,
+            content={"detail": http_err.detail},
+        )
+    except Exception as err:
+        logger.error(f"Internal auth validation error: {err}")
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized engine request"},
+        )
+
+    return await call_next(request)
+
+
 @app.get("/health")
 async def health():
-    persister = get_persister()
-    db_connected = persister.is_connected and persister.pool is not None
     return {
-        "status": "ok" if db_connected else "degraded",
+        "status": "ok",
         "service": "quickgent-engine",
-        "database": "connected" if db_connected else "disconnected",
-        "active_url": persister.active_url.split("@")[-1] if persister.active_url and "@" in persister.active_url else persister.active_url,
+        "mode": "stateless-compute",
+        "auth": "hmac-sha256-enabled",
     }
+
 
 app.include_router(copilot_router, prefix="/copilot", tags=["Copilot"])
 app.include_router(workflow_router, prefix="/workflow", tags=["Workflow"])
+

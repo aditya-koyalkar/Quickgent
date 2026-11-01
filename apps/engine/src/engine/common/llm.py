@@ -123,3 +123,54 @@ async def invoke_llm_with_fallback(
 
     raise last_error or RuntimeError("All candidate models failed during LLM execution.")
 
+
+async def astream_llm_with_fallback(
+    messages: List[Any],
+    model_name: Optional[str] = None,
+    temperature: float = 0.7,
+    google_api_key: Optional[str] = None,
+):
+    """
+    Streams LLM tokens chunk by chunk, with fallback model support if initialization fails.
+    Yields (chunk, used_model_name).
+    """
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    api_key = (
+        google_api_key
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+    )
+    if api_key:
+        api_key = api_key.strip()
+
+    candidates = resolve_candidate_models(model_name)
+    last_error: Optional[Exception] = None
+
+    for cand in candidates:
+        has_yielded = False
+        try:
+            logger.info(f"Streaming LLM with model='{cand}' (temp={temperature})...")
+            model = ChatGoogleGenerativeAI(
+                model=cand,
+                google_api_key=api_key,
+                temperature=temperature,
+                max_retries=1,
+            )
+            async for chunk in model.astream(messages):
+                has_yielded = True
+                yield chunk, cand
+            return
+        except Exception as e:
+            err_str = str(e)
+            logger.warning(f"Streaming model '{cand}' failed ({err_str[:120]}). Trying next candidate...")
+            last_error = e
+            if has_yielded:
+                raise
+            if "400" in err_str and "API_KEY_INVALID" in err_str:
+                raise
+            continue
+
+    raise last_error or RuntimeError("All candidate models failed during LLM streaming.")
+
+

@@ -7,12 +7,12 @@ from .llm import (
     resolve_candidate_models,
     get_llm,
     invoke_llm_with_fallback,
+    astream_llm_with_fallback,
 )
-from .persistence import (
-    EnginePersister,
-    get_persister,
-    init_persister,
-    close_persister,
+from .auth import (
+    INTERNAL_ENGINE_SECRET,
+    generate_engine_signature,
+    verify_engine_request,
 )
 
 __all__ = [
@@ -21,8 +21,8 @@ __all__ = [
     "resolve_candidate_models",
     "get_llm",
     "invoke_llm_with_fallback",
-    "EnginePersister",
-    "get_persister",
-    "init_persister",
-    "close_persister",
+    "astream_llm_with_fallback",
+    "INTERNAL_ENGINE_SECRET",
+    "generate_engine_signature",
+    "verify_engine_request",
 ]
